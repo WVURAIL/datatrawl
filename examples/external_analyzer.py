@@ -1,7 +1,8 @@
 """
-Test fixture: an analyzer that lives OUTSIDE src/datatrawl/, the way a user's own
-analysis would. test_external_plugin.py loads it to prove the external-plugin path
-works; it doubles as a concrete reference for the pattern in docs/ADDING_AN_ANALYZER.md.
+Worked external-analyzer example:
+an analyzer that lives OUTSIDE src/datatrawl/, the way a user's own analysis would.
+test_external_plugin.py loads it to prove the external-plugin path works; it doubles as a 
+concrete reference for the pattern in docs/ADDING_AN_ANALYZER.md.
 
 It is loaded into datatrawl at runtime via any of:
 

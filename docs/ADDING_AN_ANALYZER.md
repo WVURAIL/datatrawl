@@ -8,7 +8,9 @@ The public and internal plugin type is `analyzer`.
 ## Minimal analyzer
 
 ```python
-from datatrawl.interfaces import Analyzer, PluginInfo, RunContext
+import numpy as np
+
+from datatrawl.interfaces import PluginInfo, RunContext
 from datatrawl.analyzer_base import AccumulatingAnalyzer
 from datatrawl.registry import analyzer as register_analyzer
 
@@ -18,20 +20,30 @@ class MyAnalyzer(AccumulatingAnalyzer):
     info = PluginInfo(
         name="my-analyzer",
         kind="analyzer",
-        summary="Accumulate a small product from streamed arrays.",
+        summary="Accumulate mean power from streamed arrays.",
         instruments=("*",),
         produces="my-analyzer/<selection>.npz",
         requires=("numpy",),
     )
 
-    def begin(self, ctx: RunContext, first_meta):
+    def __init__(self):
+        super().__init__()
         self._count = 0
         self._sum = 0.0
 
+    def begin(self, ctx: RunContext, first_meta):
+        # begin() is also called after resume() when new files remain.
+        # Capture first-file metadata here if needed, but do not reset
+        # accumulators restored by _restore().
+        pass
+
     def consume_file(self, arrays, meta):
         n = 0
+
         for arr in arrays:
-            self._sum += float(arr.mean())
+            # Readers may yield complex baseband arrays. Accumulate a real,
+            # nonnegative statistic rather than casting a complex mean to float.
+            self._sum += float(np.mean(np.abs(arr) ** 2))
             n += 1
 
         self._record(meta)

@@ -348,11 +348,8 @@ datatrawl list analyzers
 datatrawl scan --name <survey-name> --analyzer fstat-detector --select 844
 ```
 
-For a concrete external analyzer reference, see:
-
-```text
-tests/external_analyzer.py
-```
+For a concrete external analyzer reference, see 
+[`examples/external_analyzer.py`](examples/external_analyzer.py).
 
 It lives outside `src/datatrawl/` and is loaded the same way a user project would
 load its own analyzer.
@@ -363,6 +360,8 @@ An analyzer consumes arrays from a reader and writes a small resumable product.
 The most common pattern is to subclass `AccumulatingAnalyzer`:
 
 ```python
+import numpy as np
+
 from datatrawl.interfaces import PluginInfo, RunContext
 from datatrawl.analyzer_base import AccumulatingAnalyzer
 from datatrawl.registry import analyzer as register_analyzer
@@ -373,23 +372,33 @@ class MyAnalyzer(AccumulatingAnalyzer):
     info = PluginInfo(
         name="my-analyzer",
         kind="analyzer",
-        summary="Accumulate a small product from streamed arrays.",
+        summary="Accumulate mean power from streamed arrays.",
         instruments=("*",),
         produces="my-analyzer/<selection>.npz",
         requires=("numpy",),
     )
 
-    def begin(self, ctx: RunContext, first_meta):
+    def __init__(self):
+        super().__init__()
         self._count = 0
         self._sum = 0.0
 
+    def begin(self, ctx: RunContext, first_meta):
+        # begin() is also called after resume() when new files remain.
+        # Capture first-file metadata here if needed, but do not reset
+        # accumulators restored by _restore().
+        pass
+
     def consume_file(self, arrays, meta):
         n = 0
+
         for arr in arrays:
-            self._sum += float(arr.mean())
+            # Readers may yield complex baseband arrays. Accumulate a real,
+            # nonnegative statistic rather than casting a complex mean to float.
+            self._sum += float(np.mean(np.abs(arr) ** 2))
             n += 1
 
-        self._record(meta)      # important: enables resume
+        self._record(meta)
         self._count += n
         return n
 
