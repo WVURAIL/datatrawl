@@ -718,6 +718,25 @@ def cmd_explore(args) -> int:
     return 0
 
 
+def _require_plugin(kind: str, name: str):
+    """registry.get(), but turn a missing plugin into a clean, actionable error.
+
+    The common trigger is `scan --name <inv>`: the inventory's meta records the
+    source/reader by *name*, but a custom plugin named there is not auto-loaded,
+    so it must still be passed with --plugin. Without this, registry.get() raises
+    a bare KeyError as an uncaught traceback.
+    """
+    try:
+        return registry.get(kind, name)
+    except KeyError as exc:
+        msg = exc.args[0] if exc.args else str(exc)
+        raise SystemExit(
+            f"{msg}\n  If {name!r} is a custom {kind} from your own project, load "
+            f"it with --plugin (or DATATRAWL_PLUGINS / an entry point) -- a "
+            f"source/reader/analyzer named in an inventory's meta is not "
+            f"auto-loaded. `datatrawl list` shows what is currently registered.")
+
+
 def cmd_scan(args) -> int:
     from . import pipeline
     _resolve_from_meta(args)            # backfill telescope/source/reader from the
@@ -736,9 +755,9 @@ def cmd_scan(args) -> int:
     # from the band geometry, not nfft).
     if getattr(args, "nfft", None):
         instrument.nfft = int(args.nfft)
-    src = registry.get("source", args.source)()
-    rdr = registry.get("reader", args.reader)()
-    red_cls = registry.get("analyzer", args.analyzer)
+    src = _require_plugin("source", args.source)()
+    rdr = _require_plugin("reader", args.reader)()
+    red_cls = _require_plugin("analyzer", args.analyzer)
 
     # The analysis splits --select into independent runs (one product each).
     # For the spectrum analyzer that is one run per freq_id: each <freq_id>.npz
@@ -952,6 +971,10 @@ def build_parser() -> argparse.ArgumentParser:
                           help="recon filter: comma-separated substrings; keep only "
                                "scope/dataset names containing ALL of them "
                                "(case-insensitive).")
+    p_survey.add_argument("--set", dest="set_opts", action="append", metavar="KEY=VALUE",
+                          help="source-specific parameter passed via ctx.options "
+                               "(repeatable), for a custom source's survey(), e.g. "
+                               "--set source_root=/data")
     p_survey.add_argument("--dry-run", action="store_true")
     p_survey.set_defaults(func=cmd_survey)
 
