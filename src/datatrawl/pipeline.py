@@ -129,6 +129,22 @@ def run(
     if max_files:
         units = units[:max_files]
 
+    # Correctness guard: an analyzer that depends on consume order (a CFAR
+    # baseline, any running/trailing statistic) declares requires_in_order. The
+    # default 1 worker / 1 slot delivers files in source order; >1 of either
+    # delivers them in download-completion order, which would silently change such
+    # an analyzer's product. Refuse the combination rather than produce a wrong
+    # result. (A commutative analyzer leaves the flag False and parallelises freely.)
+    if getattr(analyzer, "requires_in_order", False) and (
+            download_workers > 1 or max_staged_files > 1):
+        name = getattr(getattr(analyzer, "info", None), "name", type(analyzer).__name__)
+        raise SystemExit(
+            f"analyzer {name!r} requires in-order file delivery, which is "
+            f"incompatible with --download-workers {download_workers} / "
+            f"--max-staged-files {max_staged_files} (these deliver files in "
+            f"download-completion order). Rerun with --download-workers 1 and "
+            f"--max-staged-files 1 (the defaults).")
+
     # Make engine-level run parameters visible to the analyzer BEFORE resume, so it
     # can stamp them into its product and refuse an incompatible resume (e.g. a
     # capped smoke-test product must not be silently "completed" by a full run).

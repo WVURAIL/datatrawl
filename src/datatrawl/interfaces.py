@@ -191,8 +191,17 @@ class Analyzer:
 
     Keeping all accumulator writes on the engine's main thread (the engine only
     parallelises fetch) means an analyzer needs no locking.
+
+    Ordering: set `requires_in_order = True` if the product depends on the order
+    files are consumed -- e.g. a running/trailing statistic, a CFAR baseline, or
+    anything that is not a commutative accumulation. The engine then refuses the
+    parallel settings (`--download-workers`/`--max-staged-files` > 1) that would
+    deliver files in download-completion order, so such an analyzer can never
+    silently produce an order-dependent result. Leave it False (the default) for a
+    commutative accumulation like a summed PSD, which is correct at any worker count.
     """
     info: PluginInfo
+    requires_in_order: bool = False
 
     def resume(self, path: str, ctx: RunContext) -> bool:
         """Load an existing product to continue it. Return False if none/incompatible.

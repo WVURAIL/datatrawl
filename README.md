@@ -4,8 +4,6 @@
 [![python](https://img.shields.io/badge/python-3.9%2B-blue.svg)](https://www.python.org/downloads/)
 [![license: MIT](https://img.shields.io/badge/license-MIT-yellow.svg)](LICENSE)
 
-datatrawl
-
 Storage-safe archive trawling for resumable telescope-data analysis.
 
 `datatrawl` is a downstream run layer for safely scanning Datatrail/CADC data
@@ -109,7 +107,7 @@ the real pipeline with no survey at all via the `local` source:
 # what is there?
 datatrawl explore --source local --source-root <dir> --telescope chime
 
-# stage -> reduce -> checkpoint, exactly as a survey-driven scan would
+# stage -> analyze -> checkpoint, exactly as a survey-driven scan would
 datatrawl scan --source local --source-root <dir> \
   --telescope chime --reader chime-baseband --analyzer spectrum \
   --select <freq_id> --max-frames-per-file 5
@@ -177,7 +175,7 @@ datatrawl scan \
 Plot it:
 
 ```bash
-# 4. the product is results/chime/spectrum/844.npz; plot it (needs matplotlib)
+# the product is results/chime/spectrum/844.npz; plot it (needs matplotlib)
 python - <<'PY'
 import numpy as np, matplotlib.pyplot as plt
 z = np.load("results/chime/spectrum/844.npz", allow_pickle=False)
@@ -189,7 +187,7 @@ plt.show(); plt.savefig("results/chime/spectrum/844.png")
 PY
 ```
 
-A strong narrow feature, other than DC, should appear in the freq_id-844 band at ~470.309 MHz -- that is
+A strong narrow feature should appear in the freq_id-844 band at ~470.309 MHz -- that is
 the "pilot tone." Re-run the identical `scan` command to verify resume; it should report the
 product is already complete. On a headless session -- a script rather than a notebook cell,
 as is common on CANFAR -- `plt.show()` does nothing; save the figure with

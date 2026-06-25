@@ -75,6 +75,24 @@ self._record(meta)
 once per successfully consumed file, or implement equivalent `processed_keys()` behavior.
 This enables resume.
 
+### Declare order-dependence
+
+By default the engine delivers files in source (enumerate) order, but a user can raise
+`--download-workers` or `--max-staged-files` above 1 to overlap downloads, which delivers
+files in completion order instead. If your product depends on consume order -- a CFAR
+baseline, a running/trailing statistic, anything that is not a commutative accumulation --
+set:
+
+```python
+class MyAnalyzer(AccumulatingAnalyzer):
+    requires_in_order = True
+```
+
+The engine then refuses those parallel settings for your analyzer (with an actionable
+error) rather than silently producing an order-dependent result. Leave it unset (the
+default, `False`) for a commutative accumulation like a summed PSD, which is correct at any
+worker count and can parallelise freely.
+
 ### Validate resume parameters
 
 If an option changes product meaning, save it and refuse incompatible resumes.
