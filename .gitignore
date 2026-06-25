@@ -1,0 +1,35 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.pytest_cache/
+.venv/
+venv/
+
+# Products / scratch (never commit data)
+*.npz
+inventory.jsonl
+/scratch/
+data/
+results/
+logs/
+
+# Secrets / credentials (never commit a CADC cert)
+*.pem
+*.crt
+*.key
+cadcproxy.pem
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+.ipynb_checkpoints/
+
+# Apply-bundle artifacts (never commit these)
+changes.diff
+*_apply.zip
+APPLY.md

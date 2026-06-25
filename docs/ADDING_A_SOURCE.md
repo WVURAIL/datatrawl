@@ -1,0 +1,82 @@
+# Adding a source
+
+A **source** answers *where the data lives and how to list and stage it*. You add one when
+your data is in a new place -- a different Datatrail scope with its own layout, or a
+filesystem location the shipped sources don't cover.
+
+This is one of the four pluggable pieces (instrument / source / reader / analyzer); see
+[`ADDING_A_READER.md`](ADDING_A_READER.md), [`ADDING_AN_ANALYZER.md`](ADDING_AN_ANALYZER.md),
+and [`ADDING_A_TELESCOPE.md`](ADDING_A_TELESCOPE.md) for the others. `datatrawl` is the thin
+layer between Datatrail and your analyzer, so a source is usually small;
+[`DATATRAIL_BOUNDARY.md`](DATATRAIL_BOUNDARY.md) covers what Datatrail owns versus what a
+source owns.
+
+## The two methods
+
+A source implements `enumerate` and `fetch`, deliberately split so the cheap listing step
+can be cached and re-run without ever touching bulk data:
+
+```python
+from datatrawl.interfaces import DataSource, Unit, PluginInfo, RunContext
+from datatrawl.registry import source as register_source
+
+
+@register_source
+class MySource(DataSource):
+    info = PluginInfo(
+        name="my-source",
+        kind="source",
+        summary="List + stage <whatever> from <wherever>.",
+        needs_archive_config=False,    # True if it pulls from the CADC archive
+    )
+
+    def enumerate(self, ctx: RunContext):
+        # One Unit per stage-able file. key = stable id (dedup/resume),
+        # name = local filename, meta = anything the reader/analyzer needs.
+        for rec in my_listing(ctx):
+            yield Unit(key=rec.uri, name=rec.filename,
+                       meta={"obs_date": rec.date, "freq_id": rec.freq_id})
+
+    def fetch(self, unit: Unit, dest: str):
+        try:
+            my_download(unit.key, dest)
+            return True, ""
+        except Exception as exc:
+            return False, str(exc)         # the engine retries / quarantines
+```
+
+`survey()` is optional: implement it when `enumerate()` is expensive (a network listing) so
+`datatrawl survey` can cache the inventory to disk and later steps reuse it without
+re-listing. A cheap source can leave it unimplemented and just enumerate on demand.
+
+## A different archive layout
+
+The shipped `cadc-datatrail` source is specific to CHIME baseband -- it enumerates
+`baseband_<event>_<freq_id>.h5` per event. A Datatrail scope with a different layout (for
+example a processed-acquisition scope whose datasets carry their own attached files) needs a
+*new source*: one that enumerates that scope's datasets and files and yields one `Unit`
+per file. The shipped `cadc-datatrail` source is the reference -- it reaches Datatrail
+through its Python API (`dtcli.src.functions`), not the CLI (`datatrail ls` / `ps` are
+still the way to explore a scope's layout by hand first). Build it in your own project and
+load it with `--plugin`; nothing in datatrawl changes.
+
+References: `src/datatrawl/plugins/sources/local.py` (a minimal source) and
+`src/datatrawl/plugins/sources/cadc_datatrail.py` (a full Datatrail survey).
+
+## Registering and loading
+
+The same for all four piece types. In-tree: drop the module in `plugins/sources/` and add
+it to the import list in `plugins/__init__.py`. In your own project (recommended for
+project-specific work) keep it in your repo and load it with:
+
+```bash
+datatrawl scan --plugin /path/to/my_source.py ...
+# or:
+export DATATRAWL_PLUGINS=/path/to/my_source.py
+# or an entry point in your package's pyproject.toml:
+#   [project.entry-points."datatrawl.plugins"]
+#   my-source = "mypkg.my_source"
+```
+
+Once loaded it shows up in `datatrawl list` / `doctor` and runs through the same engine
+(staging, dedup, quarantine, resume) as a built-in.

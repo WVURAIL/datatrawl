@@ -1,0 +1,9 @@
+# K'niʔatn K'l‿stk'masqt Outrigger (KKO). CHIME-compatible channelization, so it
+# inherits all of CHIME's geometry via `extends` and overrides only feeds + scope.
+name: kko
+extends: chime
+
+n_feeds: 256             # outriggers (CHIME is 2048); same across gbo/hco/kko
+
+scopes:
+  - kko.event.baseband.raw

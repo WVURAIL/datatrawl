@@ -1,0 +1,283 @@
+"""
+datatrawl.pipeline -- the storage-safe streaming engine.
+
+This is the fixed part of the tool: a storage-safe streaming loop. For every
+Unit in a selection it:
+
+    fetch (downloader thread(s) stage files onto scratch)
+    read  (Reader -> iterable of arrays)
+    reduce(Analyzer.consume_file accumulates)
+    delete the staged file immediately
+    checkpoint the Analyzer's product every N files (atomic, via the analyzer)
+
+Scratch usage is bounded by a semaphore: at most `max_staged_files` files are on
+disk at once, enforced across all downloader threads (a slot is freed only after
+the consumer deletes the file). The default (`max_staged_files=1`,
+`download_workers=1`) holds exactly one file at a time, in source order. Raising
+either trades scratch (bounded at max_staged_files x largest file) and ordering
+for download/reduce overlap; with >1 worker the analyzer sees files in
+completion order, so an analyzer that needs source order must run with the default.
+
+Restartable: on restart the analyzer re-loads its product, reports which units it
+already holds, and the engine processes only the rest.
+
+The engine knows nothing about file layouts, power spectra, or N^2 visibilities
+-- only Units, Readers, and Analyzers. That is what makes one engine serve every
+telescope/source/reader/analyzer combination.
+"""
+from __future__ import annotations
+
+import hashlib
+import itertools
+import json
+import os
+import queue
+import sys
+import threading
+import time
+from dataclasses import dataclass
+from typing import Iterable, Optional
+
+from .interfaces import DataSource, Reader, Analyzer, RunContext, Unit
+
+
+def _rm(path: Optional[str]) -> None:
+    if path and os.path.exists(path):
+        try:
+            os.remove(path)
+        except OSError:
+            pass
+
+
+def _stage_name(unit: Unit) -> str:
+    """Scratch filename derived from the stable key, so two units with the same
+    basename (the same file under different paths, or a name reused across a
+    selection) never collide on disk and corrupt each other's run."""
+    h = hashlib.sha256(unit.key.encode("utf-8")).hexdigest()[:16]
+    return f"{h}_{os.path.basename(unit.name) or 'file'}"
+
+
+@dataclass
+class RunResult:
+    out_path: str
+    n_total: int
+    n_done: int
+    n_new: int
+    n_failed: int
+    n_quarantined: int = 0
+
+
+def _load_quarantine(path: Optional[str]) -> set:
+    """Return the set of file *names* previously quarantined (bad/unreadable).
+
+    Keyed by baseband filename rather than URI so an exclusion survives a
+    re-survey that re-introduces the same file under a different path/size
+    (so a re-survey can't slip a known-bad file back in under a new path).
+    """
+    names: set = set()
+    if not path or not os.path.exists(path):
+        return names
+    with open(path) as fh:
+        for line in fh:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                rec = json.loads(line)
+            except Exception:                                # noqa: BLE001
+                continue
+            name = rec.get("name") or rec.get("key")
+            if name:
+                names.add(name)
+    return names
+
+
+def _append_quarantine(path: Optional[str], unit: Unit, reason: str) -> None:
+    """Append a durable, reviewable record that this file was excluded."""
+    if not path:
+        return
+    os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
+    rec = {
+        "key": unit.key,
+        "name": unit.name,
+        "reason": reason,
+        "time": time.strftime("%Y-%m-%dT%H:%M:%S"),
+    }
+    with open(path, "a") as fh:
+        fh.write(json.dumps(rec) + "\n")
+
+
+def run(
+    *,
+    source: DataSource,
+    reader: Reader,
+    analyzer: Analyzer,
+    units: Iterable[Unit],
+    out_path: str,
+    tmp_dir: str,
+    ctx: RunContext,
+    checkpoint_every: int = 50,
+    download_workers: int = 1,
+    max_staged_files: int = 1,
+    max_files: Optional[int] = None,
+    max_frames_per_file: Optional[int] = None,
+    quarantine_path: Optional[str] = None,
+    verbose: bool = True,
+) -> RunResult:
+    units = list(units)
+    n_total = len(units)
+    if max_files:
+        units = units[:max_files]
+
+    # Make engine-level run parameters visible to the analyzer BEFORE resume, so it
+    # can stamp them into its product and refuse an incompatible resume (e.g. a
+    # capped smoke-test product must not be silently "completed" by a full run).
+    if ctx.options is None:
+        ctx.options = {}
+    ctx.options["max_frames_per_file"] = max_frames_per_file
+
+    # Resume: let the analyzer re-load (and validate) its own product.
+    resumed = analyzer.resume(out_path, ctx)
+    done_keys = set(analyzer.processed_keys()) if resumed else set()
+    if verbose and resumed:
+        print(f"resume: {len(done_keys)} unit(s) already in {out_path}")
+
+    # Quarantine: files previously found bad/unreadable are excluded for good,
+    # matched by filename so a re-survey can't slip a known-bad file back in.
+    quarantined = _load_quarantine(quarantine_path)
+    if verbose and quarantined:
+        print(f"quarantine: {len(quarantined)} file(s) excluded as bad "
+              f"(recorded in {quarantine_path})")
+
+    todo = [u for u in units if u.key not in done_keys
+            and u.name not in quarantined]
+    if verbose:
+        print(f"{n_total} unit(s) total, {len(done_keys)} done, "
+              f"{len(quarantined)} quarantined, {len(todo)} to process "
+              f"-> {out_path}")
+    if not todo:
+        print("nothing to do -- selection already complete in this product")
+        return RunResult(out_path, n_total, len(done_keys), 0, 0, 0)
+
+    os.makedirs(tmp_dir, exist_ok=True)
+    os.makedirs(os.path.dirname(os.path.abspath(out_path)), exist_ok=True)
+
+    # producer/consumer: downloader thread(s) stage files; the MAIN thread does
+    # all reading, accumulation, and checkpointing -> single-writer, no locks.
+    #
+    # Storage safety: a bounded semaphore caps files-on-scratch at max_staged_files.
+    # A downloader acquires a slot BEFORE staging a file; the slot is released by
+    # the consumer only AFTER it deletes that file. So disk never exceeds the bound
+    # regardless of how many download threads run. Default 1/1 = exactly one file
+    # at a time, delivered in source order.
+    n_workers = max(1, download_workers)
+    n_slots = max(1, max_staged_files)
+    stage_slots = threading.BoundedSemaphore(n_slots)
+    work_q: "queue.Queue[Unit]" = queue.Queue()
+    for u in todo:
+        work_q.put(u)
+    ready_q: "queue.Queue[tuple]" = queue.Queue(maxsize=n_slots + 1)
+    stop = threading.Event()
+
+    def _downloader() -> None:
+        while not stop.is_set():
+            try:
+                unit = work_q.get_nowait()
+            except queue.Empty:
+                return
+            stage_slots.acquire()                # reserve a disk slot before staging
+            if stop.is_set():
+                stage_slots.release()
+                return
+            dest = os.path.join(tmp_dir, _stage_name(unit))
+            try:
+                ok, err = source.fetch(unit, dest)
+            except Exception as exc:                       # noqa: BLE001
+                ok, err = False, f"{type(exc).__name__}: {exc}"
+            ready_q.put((unit, dest, ok, err))
+
+    workers = [threading.Thread(target=_downloader, daemon=True)
+               for _ in range(n_workers)]
+    for w in workers:
+        w.start()
+    if verbose:
+        print(f"streaming with {len(workers)} download worker(s), "
+              f"<= {n_slots} file(s) on scratch", flush=True)
+
+    started = False
+    t0, got, fail, quar = time.time(), 0, 0, 0
+    try:
+        for _ in range(len(todo)):           # exactly one ready item per todo unit
+            unit, dest, ok, err = ready_q.get()
+            try:
+                if not ok:
+                    # fetch failure == transient (network/cert) -> retry on re-run
+                    fail += 1
+                    print(f"  FAIL fetch {unit.name}: {err}", file=sys.stderr)
+                    continue
+                try:
+                    meta = dict(reader.probe(dest))
+                except Exception as exc:                    # noqa: BLE001
+                    # bytes arrived but won't read (bad header/corrupt): the file is
+                    # deterministically bad. Quarantine (record + skip for good)
+                    # rather than failing the run forever.
+                    reason = f"probe/read: {type(exc).__name__}: {exc}"
+                    if quarantine_path:
+                        quar += 1
+                        quarantined.add(unit.name)
+                        _append_quarantine(quarantine_path, unit, reason)
+                        print(f"  QUARANTINE {unit.name}: {reason}", file=sys.stderr)
+                    else:
+                        fail += 1
+                        print(f"  FAIL read {unit.name}: {reason}", file=sys.stderr)
+                    continue
+                meta.update(unit.meta)
+                meta["unit_key"] = unit.key
+                meta["unit_name"] = unit.name
+                if not started:
+                    analyzer.begin(ctx, meta)     # may raise SystemExit on a bad resume
+                    started = True
+                try:
+                    arrays = reader.iter_arrays(dest, ctx)
+                    if max_frames_per_file:
+                        arrays = itertools.islice(arrays, max_frames_per_file)
+                    analyzer.consume_file(arrays, meta)
+                except Exception as exc:                    # noqa: BLE001
+                    reason = f"reduce/read: {type(exc).__name__}: {exc}"
+                    if quarantine_path:
+                        quar += 1
+                        quarantined.add(unit.name)
+                        _append_quarantine(quarantine_path, unit, reason)
+                        print(f"  QUARANTINE {unit.name}: {reason}", file=sys.stderr)
+                    else:
+                        fail += 1
+                        print(f"  FAIL reduce {unit.name}: {reason}", file=sys.stderr)
+                    continue
+                got += 1
+                done_keys.add(unit.key)
+                if verbose and got % 25 == 0:
+                    s = analyzer.summary()
+                    rate = (s.get("count", 0)) / max(time.time() - t0, 1e-9)
+                    print(f"  [{len(done_keys)}/{n_total}] {got} new, {fail} failed, "
+                          f"{quar} quarantined, {rate:.1f} unit-frames/s  {s}",
+                          flush=True)
+                if got % checkpoint_every == 0:
+                    analyzer.save(out_path)
+                    if verbose:
+                        print(f"  ...checkpoint ({got} new, {len(done_keys)} total)",
+                              flush=True)
+            finally:
+                _rm(dest)               # delete the staged file...
+                stage_slots.release()   # ...then free its slot for the next download
+    finally:
+        stop.set()
+        for w in workers:
+            w.join(timeout=2.0)
+
+    if started:
+        analyzer.save(out_path)
+    quar_note = f", {quar} quarantined" if quar else ""
+    print(f"done: {len(done_keys)}/{n_total} units, {got} new this run, "
+          f"{fail} failed{quar_note} | {analyzer.summary()}")
+    print(f"product: {out_path}")
+    return RunResult(out_path, n_total, len(done_keys), got, fail, quar)

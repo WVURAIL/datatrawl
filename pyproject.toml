@@ -1,0 +1,80 @@
+[build-system]
+requires = ["setuptools>=64", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "datatrawl"
+version = "0.1.0"
+description = "Storage-safe, pluggable, resumable analysis of archived telescope data on the CANFAR Science Platform."
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+authors = [
+    { name = "WVU Radio Astronomy Instrumentation Lab (RAIL)" },
+]
+keywords = ["radio-astronomy", "CANFAR", "CADC", "CHIME"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Intended Audience :: Science/Research",
+    "Topic :: Scientific/Engineering :: Astronomy",
+]
+
+# Core runtime deps. The streaming engine and the spectrum analyzer need
+# numpy/scipy/h5py; pyyaml loads the instrument geometry files. Archive access
+# (cadcdata/cadcutils/datatrail) is an OPTIONAL extra -- the local source and the
+# whole synthetic test path work without it.
+dependencies = [
+    "numpy>=1.21",
+    "scipy>=1.7",
+    "h5py>=3.0",
+    "pyyaml>=5.4",
+]
+
+[project.optional-dependencies]
+cadc = [
+    "cadcdata",
+    "cadcutils",
+]
+gpu = [
+    # CuPy must match the CUDA module of your CANFAR session image, so it is not
+    # pinned here. datatrawl uses whatever cupy the image already ships; if it has
+    # none, run `datatrawl setup-cupy --install` to detect the image's CUDA version
+    # and install the matching cupy-cudaXXx wheel into the active environment.
+]
+dev = [
+    "pytest>=7",
+]
+survey = [
+    # `datatrawl survey` walks the Datatrail archive to build inventory.jsonl.
+    # Needs the datatrail CLI + the CADC client; scanning an existing inventory
+    # does NOT, so these stay opt-in.
+    "datatrawl[cadc]",
+    "datatrail-cli",
+]
+examples = [
+    # Plotting a spectrum product (the snippet in the README) needs matplotlib;
+    # the pipeline itself never imports it.
+    "matplotlib>=3.5",
+]
+
+[project.scripts]
+datatrawl = "datatrawl.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/WVURAIL/datatrawl"
+Issues = "https://github.com/WVURAIL/datatrawl/issues"
+
+[tool.setuptools]
+package-dir = { "" = "src" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+# ship the instrument YAMLs inside the wheel
+datatrawl = ["instruments/*.yaml"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
