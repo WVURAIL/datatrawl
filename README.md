@@ -144,7 +144,7 @@ By default, the local source assumes filenames contain the selected `freq_id` as
 an integer before `.h5`, for example:
 
 ```text
-baseband_<event>_844.h5
+baseband_<event>_<freq_id>.h5
 ```
 
 The default matching pattern is roughly:
@@ -290,24 +290,24 @@ Two realistic examples:
 
 ### Quick path: using datatrawl from your own project
 
-Most project-specific CHIME-baseband work only needs a new analyzer. A typical
+Most project-specific baseband work only needs a new analyzer. A typical
 external project can look like this:
 
 ```text
-my_dtv_project/
+my_project/
     pyproject.toml
     my_dtv_project/
         __init__.py
         datatrawl_plugins/
             __init__.py
-            fstat_detector.py
+            my_analyzer.py
 ```
 
 A self-contained analyzer can be loaded directly by file path:
 
 ```bash
 datatrawl list analyzers \
-  --plugin /path/to/my_dtv_project/my_dtv_project/datatrawl_plugins/fstat_detector.py
+  --plugin /path/to/my_project/my_dtv_project/datatrawl_plugins/my_analyzer.py
 ```
 
 A file loaded this way is standalone and cannot use package-relative imports. If
@@ -315,20 +315,20 @@ the analyzer imports sibling modules or shared helpers, install the project and
 load the analyzer by dotted module name instead:
 
 ```bash
-pip install -e /path/to/my_dtv_project
+pip install -e /path/to/my_project
 datatrawl list analyzers \
-  --plugin my_dtv_project.datatrawl_plugins.fstat_detector
+  --plugin my_project.datatrawl_plugins.my_analyzer
 ```
 
 Then run a readiness check for the concrete pipeline:
 
 ```bash
 datatrawl doctor \
-  --plugin /path/to/my_dtv_project/my_dtv_project/datatrawl_plugins/fstat_detector.py \
-  --telescope chime \
+  --plugin /path/to/my_project/my_project/datatrawl_plugins/my_analyzer.py \
+  --telescope <telescope> \
   --source cadc-datatrail \
   --reader chime-baseband \
-  --analyzer fstat-detector
+  --analyzer my-analyzer
 ```
 
 After you have surveyed an inventory, run a one-file smoke test before scaling
@@ -337,12 +337,12 @@ up. Keep its bounded product separate from the full run:
 ```bash
 datatrawl scan \
   --name <survey-name> \
-  --plugin /path/to/my_dtv_project/my_dtv_project/datatrawl_plugins/fstat_detector.py \
-  --analyzer fstat-detector \
-  --select 844 \
+  --plugin /path/to/my_project/my_project/datatrawl_plugins/my_analyzer.py \
+  --analyzer my-analyzer \
+  --select <freq_id> \
   --max-files 1 \
   --max-frames-per-file 1 \
-  --out smoke/fstat-detector-844.npz
+  --out smoke/my-analyzer-<freq_id>.npz
 ```
 
 Run the identical command a second time. It should report that there is nothing
@@ -355,20 +355,20 @@ project's `pyproject.toml`:
 
 ```toml
 [project.entry-points."datatrawl.plugins"]
-fstat-detector = "my_dtv_project.datatrawl_plugins.fstat_detector"
+my-analyzer = "my_project.datatrawl_plugins.my_analyzer"
 ```
 
 Install or reinstall the project so the entry-point metadata is available:
 
 ```bash
-pip install -e /path/to/my_dtv_project
+pip install -e /path/to/my_project
 ```
 
 After that, `datatrawl` can discover the plugin without `--plugin`:
 
 ```bash
 datatrawl list analyzers
-datatrawl scan --name <survey-name> --analyzer fstat-detector --select 844
+datatrawl scan --name <survey-name> --analyzer my-analyzer --select <freq_id>
 ```
 
 For a concrete external analyzer reference, see
