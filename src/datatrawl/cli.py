@@ -36,12 +36,16 @@ import hashlib
 import json
 import os
 import re
+import shutil
 import sys
+import tempfile
 from typing import List, Sequence
 
+from . import __version__
 from . import instruments as inst_mod
 from . import registry
-from .interfaces import RunContext, READY, EXPERIMENTAL, STUB
+from .interfaces import (RunContext, READY, EXPERIMENTAL, STUB,
+                         SurveyUnavailableError)
 
 
 # --------------------------------------------------------------------------
@@ -575,6 +579,9 @@ def cmd_survey(args) -> int:
               "`datatrawl scan` directly, or implement survey() to write a "
               "persistent inventory.", file=sys.stderr)
         return 2
+    except SurveyUnavailableError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
     label = "scope map" if getattr(args, "scopes_only", False) else "inventory"
     print(f"  {label}: {path}")
     if not getattr(args, "scopes_only", False):
@@ -745,6 +752,43 @@ def _require_plugin(kind: str, name: str):
             f"auto-loaded. `datatrawl list` shows what is currently registered.")
 
 
+def _path_component(value) -> str:
+    """A short filesystem-safe component for plugin names and temp prefixes."""
+    text = re.sub(r"[^A-Za-z0-9_.-]+", "_", str(value or "")).strip("._")
+    return text or "unknown"
+
+
+def _scan_tmp_dir(args, instrument) -> tuple[str, bool]:
+    """Return (directory, is_auto_created) for this scan invocation.
+
+    Explicit --tmp-dir wins. Otherwise DATATRAWL_TMPDIR is the base, followed by
+    a writable /scratch, then the platform temp directory. Auto-created paths are
+    unique per invocation so concurrent scans cannot delete each other's files.
+    """
+    if getattr(args, "tmp_dir", None):
+        return os.path.abspath(os.path.expanduser(args.tmp_dir)), False
+
+    base = os.environ.get("DATATRAWL_TMPDIR")
+    if base:
+        base = os.path.abspath(os.path.expanduser(base))
+    elif os.path.isdir("/scratch") and os.access("/scratch", os.W_OK):
+        base = "/scratch"
+    else:
+        base = tempfile.gettempdir()
+    os.makedirs(base, exist_ok=True)
+
+    prefix = (f"datatrawl_{_path_component(instrument.name)}_"
+              f"{_path_component(args.analyzer)}_")
+    return tempfile.mkdtemp(prefix=prefix, dir=base), True
+
+
+def _default_quarantine_path(args, instrument) -> str:
+    """Source/reader-scoped quarantine ledger for this telescope."""
+    name = (f"{_path_component(args.source)}--"
+            f"{_path_component(args.reader)}.jsonl")
+    return os.path.join(args.root, "results", instrument.name, "quarantine", name)
+
+
 def cmd_scan(args) -> int:
     from . import pipeline
     _resolve_from_meta(args)            # backfill telescope/source/reader from the
@@ -783,16 +827,14 @@ def cmd_scan(args) -> int:
               file=sys.stderr)
         return 1
 
-    tmp = args.tmp_dir or f"/scratch/datatrawl_{instrument.name}_{args.analyzer}"
+    tmp, auto_tmp = _scan_tmp_dir(args, instrument)
 
-    # One shared quarantine ledger for the telescope: any file found bad/unreadable
-    # is recorded here and excluded from every future run. --no-quarantine reverts
-    # to treating read failures as hard (retryable) failures.
+    # Quarantine is scoped to the source/reader pair. The ledger stores stable
+    # unit identities, so unrelated files that share a basename are not excluded.
     if getattr(args, "no_quarantine", False):
         quarantine_path = None
     else:
-        quarantine_path = args.quarantine or os.path.join(
-            args.root, "results", instrument.name, "quarantine.jsonl")
+        quarantine_path = args.quarantine or _default_quarantine_path(args, instrument)
 
     print(f"[scan] {instrument.name}  source={args.source}  reader={args.reader}  "
           f"analyzer={args.analyzer}  ({len(runs)} product(s))")
@@ -800,48 +842,52 @@ def cmd_scan(args) -> int:
     total_failed = 0
     total_quarantined = 0
     done_products = 0
-    for i, sub_sel in enumerate(runs, 1):
-        ctx.selection = sub_sel
-        units = list(src.enumerate(ctx))
-        out = args.out or _default_product_path(args, instrument, sub_sel)
-        tag = f"[{i}/{len(runs)}] select={sub_sel}"
-        if not units:
-            print(f"  {tag}: no units matched -- skipping", flush=True)
-            continue
-        print(f"  {tag}  units={len(units)} -> {out}", flush=True)
-        if args.dry_run:
-            for u in units[:3]:
-                print(f"      would process: {u.name}")
-            if len(units) > 3:
-                print(f"      ... and {len(units) - 3} more")
-            continue
-        red = red_cls()                     # FRESH analyzer per product
-        res = pipeline.run(
-            source=src, reader=rdr, analyzer=red, units=units,
-            out_path=out, tmp_dir=tmp, ctx=ctx,
-            checkpoint_every=args.checkpoint_every,
-            download_workers=args.download_workers,
-            max_staged_files=args.max_staged_files,
-            max_files=args.max_files,
-            max_frames_per_file=args.max_frames_per_file,
-            quarantine_path=quarantine_path,
-            verbose=(len(runs) == 1),       # quiet per-file noise for big fan-outs
-        )
-        total_failed += res.n_failed
-        total_quarantined += res.n_quarantined
-        done_products += 1
+    try:
+        for i, sub_sel in enumerate(runs, 1):
+            ctx.selection = sub_sel
+            units = list(src.enumerate(ctx))
+            out = args.out or _default_product_path(args, instrument, sub_sel)
+            tag = f"[{i}/{len(runs)}] select={sub_sel}"
+            if not units:
+                print(f"  {tag}: no units matched -- skipping", flush=True)
+                continue
+            print(f"  {tag}  units={len(units)} -> {out}", flush=True)
+            if args.dry_run:
+                for u in units[:3]:
+                    print(f"      would process: {u.name}")
+                if len(units) > 3:
+                    print(f"      ... and {len(units) - 3} more")
+                continue
+            red = red_cls()                     # FRESH analyzer per product
+            res = pipeline.run(
+                source=src, reader=rdr, analyzer=red, units=units,
+                out_path=out, tmp_dir=tmp, ctx=ctx,
+                checkpoint_every=args.checkpoint_every,
+                download_workers=args.download_workers,
+                max_staged_files=args.max_staged_files,
+                max_files=args.max_files,
+                max_frames_per_file=args.max_frames_per_file,
+                quarantine_path=quarantine_path,
+                verbose=(len(runs) == 1),       # quiet per-file noise for big fan-outs
+            )
+            total_failed += res.n_failed
+            total_quarantined += res.n_quarantined
+            done_products += 1
 
-    if not args.dry_run:
-        msg = (f"\nscan complete: {done_products}/{len(runs)} product(s), "
-               f"{total_failed} file failure(s)")
-        if total_quarantined:
-            msg += (f", {total_quarantined} file(s) quarantined as bad "
-                    f"(see {quarantine_path})")
-        if total_failed:
-            msg += (" -- re-run the same command to retry the failures (resume "
-                    "skips everything already done).")
-        print(msg)
-    return 0 if total_failed == 0 else 1
+        if not args.dry_run:
+            msg = (f"\nscan complete: {done_products}/{len(runs)} product(s), "
+                   f"{total_failed} file failure(s)")
+            if total_quarantined:
+                msg += (f", {total_quarantined} file(s) quarantined as bad "
+                        f"(see {quarantine_path})")
+            if total_failed:
+                msg += (" -- re-run the same command to retry the failures (resume "
+                        "skips everything already done).")
+            print(msg)
+        return 0 if total_failed == 0 else 1
+    finally:
+        if auto_tmp:
+            shutil.rmtree(tmp, ignore_errors=True)
 
 
 def _default_product_path(args, instrument, selection) -> str:
@@ -915,6 +961,8 @@ def build_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(
         prog="datatrawl", description=__doc__,
         formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--version", action="version",
+                    version=f"%(prog)s {__version__}")
     sub = ap.add_subparsers(dest="cmd", required=True)
 
     # Shared by every subcommand: load extra plugin modules so an analyzer/reader/
@@ -1044,7 +1092,10 @@ def build_parser() -> argparse.ArgumentParser:
     p_scan.add_argument("--nfft", type=positive_int, default=None,
                         help="override the analysis frame/FFT length for this run "
                              "(default: the instrument YAML's nfft)")
-    p_scan.add_argument("--tmp-dir", default=None)
+    p_scan.add_argument(
+        "--tmp-dir", default=None,
+        help="scratch directory for staged files. Default: a unique directory "
+             "under DATATRAWL_TMPDIR, writable /scratch, or the OS temp directory")
     p_scan.add_argument("--checkpoint-every", type=positive_int, default=50)
     p_scan.add_argument("--download-workers", type=positive_int, default=1,
                         help="parallel download threads (default 1; >1 overlaps "

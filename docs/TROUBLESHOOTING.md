@@ -59,9 +59,12 @@ nohup datatrawl scan ... --select 614,706 > scan.log 2>&1 &
 or inside `tmux new -s trawl` (detach `Ctrl-b d`, reattach `tmux attach -t trawl`).
 
 ### "No space left on device"
-Steady-state disk is ~one file. Check `--tmp-dir` points at fast node-local scratch
-(`/scratch/...`), not `/arc`. A hard kill can leave one staged file in `--tmp-dir`;
-it's scratch, safe to delete (products live under `results/`).
+Steady-state disk is ~one file. For long runs, point `--tmp-dir` at fast
+node-local scratch (`/scratch/...`), not `/arc`. Without `--tmp-dir`, datatrawl
+creates a unique directory under `DATATRAWL_TMPDIR`, writable `/scratch`, or the
+OS temp directory and removes it at exit. A hard kill can leave that one
+invocation directory behind; it is scratch and safe to delete (products live
+under `results/`).
 
 ### Some files failed to fetch
 The source retries each a few times with backoff; persistent failures are logged,
@@ -70,9 +73,12 @@ means "some fetches failed"; re-run to sweep them up.
 
 ### A file won't parse (quarantine)
 A file that downloads but won't parse (corrupt/truncated HDF5) is deterministically
-bad, so re-fetching usually won't help. datatrawl records it in
-`results/<telescope>/quarantine.jsonl` and excludes it from future runs. A probe
-failure occurs before reduction and can be skipped immediately. A streaming read
+bad, so re-fetching usually won't help. datatrawl records it in a
+source/reader-scoped ledger under
+`results/<telescope>/quarantine/<source>--<reader>.jsonl` and excludes that stable
+unit identity from future runs. Files with the same basename but different source
+identities remain independent. A probe failure occurs before reduction and can
+be skipped immediately. A streaming read
 failure may happen after the analyzer has accumulated partial in-memory state, so
 datatrawl records the quarantine and aborts without checkpointing; rerun the same
 command to resume from the last clean checkpoint and skip that file.

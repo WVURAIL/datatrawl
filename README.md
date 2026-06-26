@@ -115,6 +115,7 @@ below runs against the real archive, so it needs the CADC certificate from the
 install step. The install itself can be checked without an account:
 
 ```bash
+datatrawl --version   # installed release
 datatrawl list        # everything registered
 datatrawl doctor      # readiness + the combinations ready to run
 pytest -q             # reader -> analyzer -> checkpoint -> resume on synthetic data
@@ -139,6 +140,12 @@ datatrawl scan --source local --source-root <dir> \
   --telescope chime --reader chime-baseband --analyzer spectrum \
   --select <freq_id> --max-frames-per-file 5
 ```
+
+Without `--tmp-dir`, each invocation receives a unique scratch directory. The
+base directory is chosen from `DATATRAWL_TMPDIR`, then a writable `/scratch`,
+then the operating system temporary directory. Pass `--tmp-dir` when a site has
+a preferred node-local scratch location. Automatically created directories are
+removed after a successful scan when they are empty.
 
 By default, the local source assumes filenames contain the selected `freq_id` as
 an integer before `.h5`, for example:
@@ -484,3 +491,10 @@ published stable API.
 > [CHIMEFRB/datatrail-cli](https://github.com/CHIMEFRB/datatrail-cli) once the
 > rest of `datatrawl` is settled. Technical detail lives in the `UPSTREAM NOTE`
 > in [`src/datatrawl/plugins/sources/_datatrail.py`](src/datatrawl/plugins/sources/_datatrail.py).
+
+## Release history and citation
+
+Release notes are maintained in [`CHANGELOG.md`](CHANGELOG.md). A machine-readable
+software citation is provided in [`CITATION.cff`](CITATION.cff).
+
+The package and runtime report the same version with `datatrawl --version`.

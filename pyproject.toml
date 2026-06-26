@@ -15,18 +15,23 @@ authors = [
 keywords = ["radio-astronomy", "CANFAR", "CADC", "CHIME"]
 classifiers = [
     "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
     "License :: OSI Approved :: MIT License",
     "Intended Audience :: Science/Research",
     "Topic :: Scientific/Engineering :: Astronomy",
 ]
 
-# Core runtime deps. The streaming engine and the spectrum analyzer need
-# numpy/scipy/h5py; pyyaml loads the instrument geometry files. Archive access
+# Core runtime deps. The streaming engine and spectrum analyzer need numpy/h5py;
+# pyyaml loads the instrument geometry files. Archive access
 # (cadcdata/cadcutils/datatrail) is an OPTIONAL extra -- the local source and the
 # whole synthetic test path work without it.
 dependencies = [
     "numpy>=1.21",
-    "scipy>=1.7",
     "h5py>=3.0",
     "pyyaml>=5.4",
 ]
@@ -47,10 +52,11 @@ dev = [
 ]
 survey = [
     # `datatrawl survey` walks the Datatrail archive to build inventory.jsonl.
-    # Needs the datatrail CLI + the CADC client; scanning an existing inventory
-    # does NOT, so these stay opt-in.
-    "datatrawl[cadc]",
-    "datatrail-cli",
+    # Pin the current internal dtcli API contract until Datatrail exposes a stable
+    # machine-readable public interface.
+    "cadcdata",
+    "cadcutils",
+    "datatrail-cli>=0.10.3,<0.11",
 ]
 examples = [
     # Plotting a spectrum product (the snippet in the README) needs matplotlib;
@@ -63,7 +69,9 @@ datatrawl = "datatrawl.cli:main"
 
 [project.urls]
 Homepage = "https://github.com/WVURAIL/datatrawl"
+Source = "https://github.com/WVURAIL/datatrawl"
 Issues = "https://github.com/WVURAIL/datatrawl/issues"
+Changelog = "https://github.com/WVURAIL/datatrawl/blob/master/CHANGELOG.md"
 
 [tool.setuptools]
 package-dir = { "" = "src" }

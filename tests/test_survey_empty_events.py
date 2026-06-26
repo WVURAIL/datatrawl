@@ -34,6 +34,9 @@ import shutil
 import sys
 import tempfile
 
+import pytest
+
+import datatrawl.cli as cli
 from datatrawl.plugins.sources import cadc_datatrail
 from datatrawl.interfaces import RunContext
 
@@ -233,6 +236,34 @@ def test_mixed_survey():
 
 def test_empty_survey():
     assert run_empty_survey() == 0
+
+
+def test_sustained_service_outage_is_nonzero_and_preserves_state(
+        monkeypatch, tmp_path, capsys):
+    membership = {(SCOPE, ABSENT_EVENT): ["dataset_a"]}
+    monkeypatch.setattr(
+        cadc_datatrail, "_enumerate_events", lambda *a, **k: dict(membership)
+    )
+    monkeypatch.setattr(
+        cadc_datatrail.DATATRAIL, "common_path",
+        lambda scope, event: (None, False),
+    )
+    monkeypatch.setattr(cadc_datatrail, "_MAX_SERVICE_WAIT", 0)
+    monkeypatch.setattr(cadc_datatrail.time, "sleep", lambda *_: None)
+
+    out_dir = tmp_path / "survey"
+    rc = cli.main([
+        "survey", "--telescope", "chime", "--source", "cadc-datatrail",
+        "--scope", SCOPE, "--freq-ids", "614", "--out", str(out_dir),
+    ])
+    captured = capsys.readouterr()
+
+    assert rc == 1
+    assert "remained unreachable" in captured.err
+    assert "Traceback" not in captured.err
+    assert (out_dir / "inventory.jsonl").exists()
+    assert (out_dir / "attempts.json").exists()
+    assert not (out_dir / "inventory.meta.json").exists()
 
 
 if __name__ == "__main__":

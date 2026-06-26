@@ -16,6 +16,7 @@ Coverage map (review finding -> tests):
   #8 doctor readiness          -> test_geometry_only_telescope_not_archive_ready
   #9 failure boundary          -> test_reader_iteration_failure_quarantines_and_aborts,
                                   test_analyzer_failure_aborts_without_quarantine_and_cleans_scratch
+  #10 quarantine identity      -> test_quarantine_uses_stable_unit_identity
 
 Run:  PYTHONPATH=src python -m pytest tests/test_engine_safety.py -q
 """
@@ -32,7 +33,8 @@ import pytest
 
 from datatrawl import instruments as inst_mod
 from datatrawl import pipeline
-from datatrawl.pipeline import _stage_name
+from datatrawl.pipeline import (_append_quarantine, _load_quarantine,
+                                  _quarantine_key, _stage_name)
 from datatrawl.interfaces import (DataSource, Reader, Analyzer, RunContext, Unit,
                                   PluginInfo, READY)
 from datatrawl.plugins.readers._baseband_format import NFFT, make_synth_file
@@ -392,6 +394,20 @@ def test_local_source_duplicate_basenames_distinct_keys():
     assert len(units) == 2                             # both subdirs enumerated
     assert len({u.key for u in units}) == 2            # distinct keys
     assert len({_stage_name(u) for u in units}) == 2   # -> distinct scratch names
+
+
+def test_quarantine_uses_stable_unit_identity_for_duplicate_basenames():
+    work = _tmp("quarantine_identity")
+    ledger = os.path.join(work, "quarantine.jsonl")
+    bad = Unit(key="src://bad/same.h5", name="same.h5")
+    good = Unit(key="src://good/same.h5", name="same.h5")
+
+    _append_quarantine(ledger, bad, "bad header")
+    keys, legacy_names = _load_quarantine(ledger)
+
+    assert _quarantine_key(bad) in keys
+    assert _quarantine_key(good) not in keys
+    assert legacy_names == set()
 
 
 def test_local_explore_reports_filename_freq_ids(capsys):

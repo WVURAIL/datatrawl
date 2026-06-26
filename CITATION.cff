@@ -1,0 +1,17 @@
+cff-version: 1.2.0
+message: "If you use datatrawl in research, please cite the software using this metadata."
+title: "datatrawl"
+type: software
+version: 0.1.0
+authors:
+  - name: "WVU Radio Astronomy Instrumentation Lab (RAIL)"
+repository-code: "https://github.com/WVURAIL/datatrawl"
+url: "https://github.com/WVURAIL/datatrawl"
+license: MIT
+keywords:
+  - radio astronomy
+  - telescope data
+  - CANFAR
+  - CADC
+  - CHIME
+  - signal processing

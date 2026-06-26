@@ -79,16 +79,28 @@ def _reader_arrays(reader: Reader, path: str, ctx: RunContext):
         raise _ReaderIterationError(f"{type(exc).__name__}: {exc}") from exc
 
 
-def _load_quarantine(path: Optional[str]) -> set:
-    """Return the set of file *names* previously quarantined (bad/unreadable).
+def _quarantine_key(unit: Unit) -> str:
+    """Stable logical identity used by the quarantine ledger.
 
-    Keyed by baseband filename rather than URI so an exclusion survives a
-    re-survey that re-introduces the same file under a different path/size
-    (so a re-survey can't slip a known-bad file back in under a new path).
+    Unit.key is the generic default. A source may provide `quarantine_key` in
+    metadata when the physical fetch URI can change while the logical file stays
+    the same.
     """
-    names: set = set()
+    meta = unit.meta or {}
+    value = meta.get("quarantine_key")
+    return str(unit.key if value is None else value)
+
+
+def _load_quarantine(path: Optional[str]) -> tuple[set[str], set[str]]:
+    """Return (stable keys, legacy names) recorded as bad/unreadable.
+
+    Current records use `quarantine_key` (or the historical `key`). Name-only
+    records remain supported so existing ledgers continue to work.
+    """
+    keys: set[str] = set()
+    legacy_names: set[str] = set()
     if not path or not os.path.exists(path):
-        return names
+        return keys, legacy_names
     with open(path) as fh:
         for line in fh:
             line = line.strip()
@@ -98,10 +110,12 @@ def _load_quarantine(path: Optional[str]) -> set:
                 rec = json.loads(line)
             except Exception:                                # noqa: BLE001
                 continue
-            name = rec.get("name") or rec.get("key")
-            if name:
-                names.add(name)
-    return names
+            key = rec.get("quarantine_key", rec.get("key"))
+            if key is not None:
+                keys.add(str(key))
+            elif rec.get("name"):
+                legacy_names.add(str(rec["name"]))
+    return keys, legacy_names
 
 
 def _append_quarantine(path: Optional[str], unit: Unit, reason: str) -> None:
@@ -110,6 +124,7 @@ def _append_quarantine(path: Optional[str], unit: Unit, reason: str) -> None:
         return
     os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
     rec = {
+        "quarantine_key": _quarantine_key(unit),
         "key": unit.key,
         "name": unit.name,
         "reason": reason,
@@ -160,8 +175,9 @@ def run(
     # Make engine-level run parameters visible to the analyzer BEFORE resume, so it
     # can stamp them into its product and refuse an incompatible resume (e.g. a
     # capped smoke-test product must not be silently "completed" by a full run).
-    if ctx.options is None:
-        ctx.options = {}
+    # RunContext accepts any Mapping, including immutable mappings supplied by
+    # library callers. Copy at the engine boundary before adding run invariants.
+    ctx.options = dict(ctx.options or {})
     ctx.options["max_frames_per_file"] = max_frames_per_file
 
     # Resume: let the analyzer re-load (and validate) its own product.
@@ -170,18 +186,20 @@ def run(
     if verbose and resumed:
         print(f"resume: {len(done_keys)} unit(s) already in {out_path}")
 
-    # Quarantine: files previously found bad/unreadable are excluded for good,
-    # matched by filename so a re-survey can't slip a known-bad file back in.
-    quarantined = _load_quarantine(quarantine_path)
-    if verbose and quarantined:
-        print(f"quarantine: {len(quarantined)} file(s) excluded as bad "
+    # Quarantine: current records use a stable source-defined identity. Legacy
+    # name-only ledgers remain readable but can be less precise.
+    quarantined_keys, legacy_quarantined_names = _load_quarantine(quarantine_path)
+    n_quarantined = len(quarantined_keys) + len(legacy_quarantined_names)
+    if verbose and n_quarantined:
+        print(f"quarantine: {n_quarantined} file(s) excluded as bad "
               f"(recorded in {quarantine_path})")
 
     todo = [u for u in units if u.key not in done_keys
-            and u.name not in quarantined]
+            and _quarantine_key(u) not in quarantined_keys
+            and u.name not in legacy_quarantined_names]
     if verbose:
         print(f"{n_total} unit(s) total, {len(done_keys)} done, "
-              f"{len(quarantined)} quarantined, {len(todo)} to process "
+              f"{n_quarantined} quarantined, {len(todo)} to process "
               f"-> {out_path}")
     if not todo:
         print("nothing to do -- selection already complete in this product")
@@ -275,7 +293,7 @@ def run(
                     reason = f"probe/read: {type(exc).__name__}: {exc}"
                     if quarantine_path:
                         quar += 1
-                        quarantined.add(unit.name)
+                        quarantined_keys.add(_quarantine_key(unit))
                         _append_quarantine(quarantine_path, unit, reason)
                         print(f"  QUARANTINE {unit.name}: {reason}", file=sys.stderr)
                     else:
@@ -296,7 +314,7 @@ def run(
                 except _ReaderIterationError as exc:
                     reason = f"read: {exc}"
                     if quarantine_path:
-                        quarantined.add(unit.name)
+                        quarantined_keys.add(_quarantine_key(unit))
                         _append_quarantine(quarantine_path, unit, reason)
                         print(f"  QUARANTINE {unit.name}: {reason}", file=sys.stderr)
                         disposition = (

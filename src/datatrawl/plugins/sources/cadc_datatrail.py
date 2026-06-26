@@ -32,7 +32,8 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Iterable, List
 
-from ...interfaces import DataSource, RunContext, Unit, PluginInfo, READY
+from ...interfaces import (DataSource, RunContext, Unit, PluginInfo, READY,
+                           SurveyUnavailableError)
 from ...registry import source as _register_source
 from ._datatrail import DATATRAIL, Datatrail
 
@@ -341,6 +342,7 @@ class CadcDatatrailSource(DataSource):
                     key=uri,
                     name=_baseband_filename(r["event"], ch),
                     meta={"freq_id": ch, "event": r["event"],
+                          "quarantine_key": f"{r['event']}:{ch}",
                           "size_bytes": int(r.get("size_bytes", 0)),
                           "obs_date": r.get("obs_date", "")},
                 ))
@@ -511,11 +513,13 @@ class CadcDatatrailSource(DataSource):
                     if status != "service_down":
                         break
                     if waited >= _MAX_SERVICE_WAIT:
-                        print(f"\n[abort] service unreachable for {waited}s straight "
-                              f"-- likely an expired cert or sustained outage. Renew "
-                              f"with `cadc-get-cert -u <user>` and re-run (resumable).",
-                              flush=True)
-                        return str(inv_path)
+                        raise SurveyUnavailableError(
+                            f"Datatrail/CADC remained unreachable for {waited}s. "
+                            f"Partial survey state was preserved in {out}. Renew "
+                            "the certificate with `cadc-get-cert -u <user>` (or "
+                            "wait for the service to recover), then rerun the same "
+                            "survey command."
+                        )
                     print(f"[{i}/{len(events)}] {ev}: service unreachable -- "
                           f"waiting {backoff}s (waited {waited}s)", flush=True)
                     time.sleep(backoff); waited += backoff

@@ -247,7 +247,10 @@ def run_quarantine() -> int:
             obs_date="2024-01-09")) + "\n")
 
     root = os.path.join(work, "run")
-    qpath = os.path.join(root, "results", "chime", "quarantine.jsonl")
+    qpath = os.path.join(
+        root, "results", "chime", "quarantine",
+        "cadc-datatrail--chime-baseband.jsonl",
+    )
 
     fake1 = FakeStorageClient(fix)
     with fake_cadc(fake1):

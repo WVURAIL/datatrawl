@@ -7,7 +7,13 @@ survey + scan for your (telescope, source, reader, analyzer) combination.
 """
 from __future__ import annotations
 
+from importlib.metadata import PackageNotFoundError, version
+
 from .analyzer_base import AccumulatingAnalyzer
 
-__version__ = "0.1.0"
-__all__ = ["AccumulatingAnalyzer"]
+try:
+    __version__ = version("datatrawl")
+except PackageNotFoundError:  # source tree on PYTHONPATH, not installed
+    __version__ = "0+unknown"
+
+__all__ = ["AccumulatingAnalyzer", "__version__"]

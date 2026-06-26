@@ -45,6 +45,11 @@ class MySource(DataSource):
             return False, str(exc)         # logged now; retried when the scan is rerun
 ```
 
+`Unit.key` is also the default quarantine identity. If a physical fetch URI can change
+between surveys while the logical file remains the same, put a stable source-specific value
+in `Unit.meta["quarantine_key"]` (for example, an event/channel pair). Do not use a bare
+basename unless it is unique within that source.
+
 `survey()` is optional: implement it when `enumerate()` is expensive (a network listing) so
 `datatrawl survey` can cache the inventory to disk and later steps reuse it without
 re-listing. A cheap source can leave it unimplemented and just enumerate on demand through

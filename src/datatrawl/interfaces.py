@@ -44,6 +44,14 @@ STUB = "stub"             # interface only -- TODOs inside; will raise if run
 _STATUS_ORDER = {READY: 0, EXPERIMENTAL: 1, STUB: 2}
 
 
+class SurveyUnavailableError(RuntimeError):
+    """A survey stopped cleanly because an external service stayed unavailable.
+
+    Sources raise this after preserving their resumable state. The CLI turns it
+    into a nonzero exit without presenting the partial survey as complete.
+    """
+
+
 @dataclass(frozen=True)
 class PluginInfo:
     """One row in the discovery tables (`list` / `doctor`)."""
