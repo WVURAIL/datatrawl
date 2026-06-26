@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=64", "wheel"]
+requires = ["setuptools>=77", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -8,7 +8,8 @@ version = "0.1.0"
 description = "Storage-safe archive trawling for resumable telescope-data analysis."
 readme = "README.md"
 requires-python = ">=3.9"
-license = { text = "MIT" }
+license = "MIT"
+license-files = ["LICENSE"]
 authors = [
     { name = "WVU Radio Astronomy Instrumentation Lab (RAIL)" },
 ]
@@ -21,7 +22,6 @@ classifiers = [
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
     "Programming Language :: Python :: 3.14",
-    "License :: OSI Approved :: MIT License",
     "Intended Audience :: Science/Research",
     "Topic :: Scientific/Engineering :: Astronomy",
 ]
@@ -49,6 +49,8 @@ gpu = [
 ]
 dev = [
     "pytest>=7",
+    "build>=1.2",
+    "twine>=6.0",
 ]
 survey = [
     # `datatrawl survey` walks the Datatrail archive to build inventory.jsonl.

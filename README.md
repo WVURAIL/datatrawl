@@ -144,8 +144,8 @@ datatrawl scan --source local --source-root <dir> \
 Without `--tmp-dir`, each invocation receives a unique scratch directory. The
 base directory is chosen from `DATATRAWL_TMPDIR`, then a writable `/scratch`,
 then the operating system temporary directory. Pass `--tmp-dir` when a site has
-a preferred node-local scratch location. Automatically created directories are
-removed after a successful scan when they are empty.
+a preferred node-local scratch location. Automatically created scratch directories are removed at process exit; if a hard
+kill prevents cleanup, the leftover directory is scratch and safe to delete.
 
 By default, the local source assumes filenames contain the selected `freq_id` as
 an integer before `.h5`, for example:
