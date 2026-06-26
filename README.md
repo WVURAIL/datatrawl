@@ -303,7 +303,7 @@ external project can look like this:
 ```text
 my_project/
     pyproject.toml
-    my_dtv_project/
+    my_project/
         __init__.py
         datatrawl_plugins/
             __init__.py
@@ -314,7 +314,7 @@ A self-contained analyzer can be loaded directly by file path:
 
 ```bash
 datatrawl list analyzers \
-  --plugin /path/to/my_project/my_dtv_project/datatrawl_plugins/my_analyzer.py
+  --plugin /path/to/my_project/my_project/datatrawl_plugins/my_analyzer.py
 ```
 
 A file loaded this way is standalone and cannot use package-relative imports. If
