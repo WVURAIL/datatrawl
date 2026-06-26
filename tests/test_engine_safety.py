@@ -14,6 +14,8 @@ Coverage map (review finding -> tests):
   #5 reduction order           -> test_default_delivers_source_order
   #7 local freq_id selection   -> test_local_source_44_not_844 , _duplicate_basenames_*
   #8 doctor readiness          -> test_geometry_only_telescope_not_archive_ready
+  #9 failure boundary          -> test_reader_iteration_failure_quarantines_and_aborts,
+                                  test_analyzer_failure_aborts_without_quarantine_and_cleans_scratch
 
 Run:  PYTHONPATH=src python -m pytest tests/test_engine_safety.py -q
 """
@@ -31,7 +33,7 @@ import pytest
 from datatrawl import instruments as inst_mod
 from datatrawl import pipeline
 from datatrawl.pipeline import _stage_name
-from datatrawl.interfaces import (DataSource, Analyzer, RunContext, Unit,
+from datatrawl.interfaces import (DataSource, Reader, Analyzer, RunContext, Unit,
                                   PluginInfo, READY)
 from datatrawl.plugins.readers._baseband_format import NFFT, make_synth_file
 from datatrawl.plugins.readers.chime_baseband import ChimeBasebandReader
@@ -141,6 +143,29 @@ class _RecordingAnalyzer(Analyzer):
 
     def summary(self):
         return {"count": len(self.order)}
+
+
+class _BrokenReader(Reader):
+    """Yield one frame, then fail as a truncated streaming reader might."""
+    info = PluginInfo(name="broken-reader", kind="reader",
+                      summary="fails during iteration", status=READY,
+                      instruments=("*",))
+
+    def probe(self, path):
+        return {}
+
+    def iter_arrays(self, path, ctx):
+        yield np.zeros(8, dtype=np.float32)
+        raise OSError("truncated stream")
+
+
+class _ExplodingAnalyzer(_RecordingAnalyzer):
+    info = PluginInfo(name="explode", kind="analyzer",
+                      summary="raises a science-code error", status=READY,
+                      instruments=("*",))
+
+    def consume_file(self, arrays, meta):
+        raise ValueError("science bug")
 
 
 # ---------------------------------------------------------------------------
@@ -278,6 +303,64 @@ def test_default_delivers_source_order_even_if_later_file_is_faster():
 
 
 # ---------------------------------------------------------------------------
+# #9  reader failures are file-level; analyzer failures are run-level
+# ---------------------------------------------------------------------------
+def test_reader_iteration_failure_quarantines_and_aborts():
+    work = _tmp("reader_fail")
+    inst = inst_mod.load_instrument("chime")
+    fcen = inst.freq_of_freq_id(844) * 1e6
+    unit = Unit(key="src://bad", name="bad_844.h5", meta={"f_center_hz": fcen})
+    src = _FakeSynthSource(fcen, n_frames=2)
+    ctx = RunContext(instrument=inst, selection=[844], options={})
+    out = os.path.join(work, "reader.npz")
+    tmp = os.path.join(work, "tmp")
+    quarantine = os.path.join(work, "quarantine.jsonl")
+
+    with pytest.raises(RuntimeError, match="not checkpointed"):
+        pipeline.run(source=src, reader=_BrokenReader(),
+                     analyzer=_RecordingAnalyzer(), units=[unit], out_path=out,
+                     tmp_dir=tmp, ctx=ctx, quarantine_path=quarantine,
+                     verbose=False)
+
+    assert os.listdir(tmp) == []
+    assert not os.path.exists(out)
+    with open(quarantine) as fh:
+        assert "truncated stream" in fh.read()
+
+    # The next run skips the quarantined unit and can resume from the last clean
+    # checkpoint (there is no product in this one-file case).
+    res = pipeline.run(source=src, reader=_BrokenReader(),
+                       analyzer=_RecordingAnalyzer(), units=[unit], out_path=out,
+                       tmp_dir=tmp, ctx=ctx, quarantine_path=quarantine,
+                       verbose=False)
+    assert res.n_new == 0
+
+
+def test_analyzer_failure_aborts_without_quarantine_and_cleans_scratch():
+    work = _tmp("analyzer_fail")
+    inst = inst_mod.load_instrument("chime")
+    fcen = inst.freq_of_freq_id(844) * 1e6
+    units = [Unit(key=f"src://{i}", name=f"f_{i}_844.h5",
+                  meta={"f_center_hz": fcen}) for i in range(4)]
+    src = _FakeSynthSource(fcen, n_frames=2)
+    ctx = RunContext(instrument=inst, selection=[844], options={})
+    out = os.path.join(work, "analyzer.npz")
+    tmp = os.path.join(work, "tmp")
+    quarantine = os.path.join(work, "quarantine.jsonl")
+
+    with pytest.raises(RuntimeError, match="science bug"):
+        pipeline.run(source=src, reader=ChimeBasebandReader(),
+                     analyzer=_ExplodingAnalyzer(), units=units, out_path=out,
+                     tmp_dir=tmp, ctx=ctx, quarantine_path=quarantine,
+                     download_workers=2, max_staged_files=2, verbose=False)
+
+    assert not os.path.exists(quarantine)
+    assert not os.path.exists(out)
+    assert os.path.isdir(tmp)
+    assert os.listdir(tmp) == []
+
+
+# ---------------------------------------------------------------------------
 # #7  local source freq_id selection
 # ---------------------------------------------------------------------------
 def _touch(path):
@@ -309,6 +392,22 @@ def test_local_source_duplicate_basenames_distinct_keys():
     assert len(units) == 2                             # both subdirs enumerated
     assert len({u.key for u in units}) == 2            # distinct keys
     assert len({_stage_name(u) for u in units}) == 2   # -> distinct scratch names
+
+
+def test_local_explore_reports_filename_freq_ids(capsys):
+    import datatrawl.cli as cli
+
+    work = _tmp("explore")
+    _touch(os.path.join(work, "baseband_s0_44.h5"))
+    _touch(os.path.join(work, "baseband_s0_844.h5"))
+
+    rc = cli.main(["explore", "--source", "local", "--source-root", work,
+                   "--telescope", "chime"])
+    out = capsys.readouterr().out
+
+    assert rc == 0
+    assert "freq_ids       : 2 present (44..844)" in out
+    assert "no parseable freq_id" not in out
 
 
 # ---------------------------------------------------------------------------

@@ -47,9 +47,10 @@ Reference: `src/datatrawl/plugins/readers/chime_baseband.py` (a worked reader, w
 
 ## Registering and loading
 
-The same for all four piece types. In-tree: drop the module in `plugins/readers/` and add
-it to the import list in `plugins/__init__.py`. In your own project (recommended for
-project-specific work) keep it in your repo and load it with:
+The loading mechanism is the same for source, reader, and analyzer plugins. In-tree: drop
+the module in `plugins/readers/` and add it to the import list in `plugins/__init__.py`. In
+your own project (recommended for project-specific work), keep it in your repo and load it
+with:
 
 ```bash
 datatrawl scan --plugin /path/to/my_reader.py ...
@@ -60,5 +61,6 @@ export DATATRAWL_PLUGINS=/path/to/my_reader.py
 #   my-reader = "mypkg.my_reader"
 ```
 
-Once loaded it shows up in `datatrawl list` / `doctor` and runs through the same engine
-(staging, dedup, quarantine, resume) as a built-in.
+After adding an entry point, install or reinstall the package (`pip install -e .`) so its
+metadata is visible. Once loaded, the reader shows up in `datatrawl list` / `doctor` and
+runs through the same engine (staging, dedup, quarantine, resume) as a built-in.

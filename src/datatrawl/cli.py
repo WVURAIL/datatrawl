@@ -545,7 +545,7 @@ def _resolve_from_meta(args) -> None:
 
 def cmd_survey(args) -> int:
     instrument, ctx = _make_ctx(args)
-    src = registry.get("source", args.source)()
+    src = _require_plugin("source", args.source)()
     if getattr(args, "scopes_only", False) and not args.out:
         # the recon scope map spans telescopes (it lists every datatrail scope),
         # so it is not telescope-specific -> data/scopes.jsonl, a level above the
@@ -567,7 +567,14 @@ def cmd_survey(args) -> int:
     if args.dry_run:
         print("  dry-run: would survey")
         return 0
-    path = src.survey(ctx, out_dir)
+    try:
+        path = src.survey(ctx, out_dir)
+    except NotImplementedError as exc:
+        print(f"error: {exc}\n"
+              "This source enumerates on demand; use `datatrawl explore` / "
+              "`datatrawl scan` directly, or implement survey() to write a "
+              "persistent inventory.", file=sys.stderr)
+        return 2
     label = "scope map" if getattr(args, "scopes_only", False) else "inventory"
     print(f"  {label}: {path}")
     if not getattr(args, "scopes_only", False):
@@ -676,7 +683,7 @@ def cmd_explore(args) -> int:
               "`--source cadc-datatrail`), or --name/--inventory pointing at a "
               "surveyed inventory (survey records the source).", file=sys.stderr)
         return 2
-    src = registry.get("source", args.source)()
+    src = _require_plugin("source", args.source)()
     instrument = None
     if args.telescope:
         try:
@@ -691,6 +698,7 @@ def cmd_explore(args) -> int:
         "source_glob": getattr(args, "source_glob", None) or "*.h5",
         "source_freq_id_regex": getattr(args, "source_freq_id_regex", None),
     }
+    opts.update(_parse_set_options(getattr(args, "set_opts", None)))
     ctx = RunContext(instrument=instrument, selection=None, options=opts)
     try:
         units = list(src.enumerate(ctx))
@@ -721,10 +729,10 @@ def cmd_explore(args) -> int:
 def _require_plugin(kind: str, name: str):
     """registry.get(), but turn a missing plugin into a clean, actionable error.
 
-    The common trigger is `scan --name <inv>`: the inventory's meta records the
-    source/reader by *name*, but a custom plugin named there is not auto-loaded,
-    so it must still be passed with --plugin. Without this, registry.get() raises
-    a bare KeyError as an uncaught traceback.
+    A surveyed inventory records source/reader names, but a custom module named
+    there is not auto-loaded. It must still be passed with --plugin (or discovered
+    through the environment / an entry point). Without this helper, registry.get()
+    raises a bare KeyError as an uncaught traceback.
     """
     try:
         return registry.get(kind, name)
@@ -932,6 +940,9 @@ def build_parser() -> argparse.ArgumentParser:
     p_doctor.add_argument("--analyzer")
     p_doctor.add_argument("--gpu", action="store_true")
     p_doctor.add_argument("--source-root", default=None)
+    p_doctor.add_argument(
+        "--set", dest="set_opts", action="append", metavar="KEY=VALUE",
+        help="plugin-specific parameter passed via ctx.options (repeatable)")
     p_doctor.set_defaults(func=cmd_doctor)
 
     p_survey = sub.add_parser("survey", parents=[common],
@@ -997,6 +1008,9 @@ def build_parser() -> argparse.ArgumentParser:
     p_expl.add_argument("--source-freq-id-regex", default=None,
                         help="local source: regex with one group capturing the "
                              "freq_id int from a filename")
+    p_expl.add_argument(
+        "--set", dest="set_opts", action="append", metavar="KEY=VALUE",
+        help="source-specific parameter passed via ctx.options (repeatable)")
     p_expl.add_argument("--root", default=os.getcwd())
     p_expl.set_defaults(func=cmd_explore)
 
@@ -1056,7 +1070,7 @@ def build_parser() -> argparse.ArgumentParser:
                         help="hint analyzers to use the GPU (exposed as "
                              "ctx.options['gpu']; an analyzer opts in)")
     p_scan.add_argument("--set", dest="set_opts", action="append", metavar="KEY=VALUE",
-                        help="analyzer-specific parameter passed via ctx.options "
+                        help="plugin-specific parameter passed via ctx.options "
                              "(repeatable), e.g. --set bracket_hz=400")
     p_scan.add_argument("--dry-run", action="store_true")
     p_scan.set_defaults(func=cmd_scan)

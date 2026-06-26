@@ -67,6 +67,18 @@ class RunResult:
     n_quarantined: int = 0
 
 
+class _ReaderIterationError(RuntimeError):
+    """A reader failed while yielding arrays from a staged file."""
+
+
+def _reader_arrays(reader: Reader, path: str, ctx: RunContext):
+    """Yield reader arrays while preserving the reader/analyzer error boundary."""
+    try:
+        yield from reader.iter_arrays(path, ctx)
+    except Exception as exc:                              # noqa: BLE001
+        raise _ReaderIterationError(f"{type(exc).__name__}: {exc}") from exc
+
+
 def _load_quarantine(path: Optional[str]) -> set:
     """Return the set of file *names* previously quarantined (bad/unreadable).
 
@@ -195,6 +207,26 @@ def run(
     ready_q: "queue.Queue[tuple]" = queue.Queue(maxsize=n_slots + 1)
     stop = threading.Event()
 
+    def _queue_ready(item: tuple) -> bool:
+        """Queue a fetched item, but let cancellation wake blocked producers."""
+        while not stop.is_set():
+            try:
+                ready_q.put(item, timeout=0.1)
+                return True
+            except queue.Full:
+                pass
+        return False
+
+    def _discard_ready() -> None:
+        """Delete staged files that will not be consumed after an early abort."""
+        while True:
+            try:
+                _unit, dest, _ok, _err = ready_q.get_nowait()
+            except queue.Empty:
+                return
+            _rm(dest)
+            stage_slots.release()
+
     def _downloader() -> None:
         while not stop.is_set():
             try:
@@ -210,7 +242,10 @@ def run(
                 ok, err = source.fetch(unit, dest)
             except Exception as exc:                       # noqa: BLE001
                 ok, err = False, f"{type(exc).__name__}: {exc}"
-            ready_q.put((unit, dest, ok, err))
+            if not _queue_ready((unit, dest, ok, err)):
+                _rm(dest)
+                stage_slots.release()
+                return
 
     workers = [threading.Thread(target=_downloader, daemon=True)
                for _ in range(n_workers)]
@@ -254,21 +289,41 @@ def run(
                     analyzer.begin(ctx, meta)     # may raise SystemExit on a bad resume
                     started = True
                 try:
-                    arrays = reader.iter_arrays(dest, ctx)
+                    arrays = _reader_arrays(reader, dest, ctx)
                     if max_frames_per_file:
                         arrays = itertools.islice(arrays, max_frames_per_file)
                     analyzer.consume_file(arrays, meta)
-                except Exception as exc:                    # noqa: BLE001
-                    reason = f"reduce/read: {type(exc).__name__}: {exc}"
+                except _ReaderIterationError as exc:
+                    reason = f"read: {exc}"
                     if quarantine_path:
-                        quar += 1
                         quarantined.add(unit.name)
                         _append_quarantine(quarantine_path, unit, reason)
                         print(f"  QUARANTINE {unit.name}: {reason}", file=sys.stderr)
+                        disposition = (
+                            "The file was quarantined; rerun the same command to "
+                            "resume without it."
+                        )
                     else:
-                        fail += 1
-                        print(f"  FAIL reduce {unit.name}: {reason}", file=sys.stderr)
-                    continue
+                        disposition = (
+                            "Quarantine is disabled; fix or remove the file before "
+                            "rerunning."
+                        )
+                    raise RuntimeError(
+                        f"reader failed while streaming {unit.name}: {exc}. "
+                        "The current analyzer state was not checkpointed. "
+                        f"{disposition}"
+                    ) from exc
+                except Exception as exc:                    # noqa: BLE001
+                    analyzer_name = getattr(
+                        getattr(analyzer, "info", None),
+                        "name",
+                        type(analyzer).__name__,
+                    )
+                    raise RuntimeError(
+                        f"analyzer {analyzer_name!r} failed on {unit.name}: "
+                        f"{type(exc).__name__}: {exc}. The file was not "
+                        "quarantined; analyzer exceptions are run-level errors."
+                    ) from exc
                 got += 1
                 done_keys.add(unit.key)
                 if verbose and got % 25 == 0:
@@ -287,8 +342,11 @@ def run(
                 stage_slots.release()   # ...then free its slot for the next download
     finally:
         stop.set()
+        _discard_ready()
         for w in workers:
             w.join(timeout=2.0)
+        # A fetch may have completed while the workers were being joined.
+        _discard_ready()
 
     if started:
         analyzer.save(out_path)

@@ -87,6 +87,21 @@ self._record(meta)
 once per successfully consumed file, or implement equivalent `processed_keys()` behavior.
 This enables resume.
 
+### Preserve the reader/analyzer failure boundary
+
+A probe failure happens before the analyzer sees a file, so the engine can quarantine
+that file and continue safely. If a reader fails while yielding arrays, the analyzer
+may already hold partial in-memory updates. The engine therefore records the
+quarantine and aborts without checkpointing; rerun the same command to resume from
+the last clean checkpoint and skip the quarantined file.
+
+An unexpected exception from `consume_file` is an analyzer failure, not evidence that
+the input file is corrupt. The scan stops, the file is not quarantined, and the
+current in-memory state is not checkpointed. Fix the analyzer and rerun.
+
+If a data condition is expected, handle it explicitly in the reader or analyzer
+rather than relying on an unhandled exception to skip the file.
+
 ### Declare order-dependence
 
 By default the engine delivers files in source (enumerate) order, but a user can raise
@@ -173,6 +188,13 @@ or package entry point:
 my-analyzer = "my_project.datatrawl_plugins.my_analyzer"
 ```
 
+Install or reinstall the package after changing its entry points so the metadata is
+visible to `datatrawl`:
+
+```bash
+pip install -e /path/to/my_project
+```
+
 Loading a single file by path (`--plugin .../my_analyzer.py`) cannot resolve
 package-relative imports (`from . import ...`): the file is loaded standalone, with
 no parent package. If your plugin lives in a package (importing siblings or shared
@@ -182,13 +204,20 @@ the entry point above.
 
 ## Preflight checklist
 
-Before archive scale:
+Before archive scale, keep the bounded smoke-test product separate from the full run:
 
 ```bash
-datatrawl list analyzers
-datatrawl doctor --telescope <instrument> --source <source> --reader <reader> --analyzer <name>
-datatrawl scan --name <inventory> --analyzer <name> --max-files 1 --max-frames-per-file 1
+PLUGIN=/path/to/my_analyzer.py   # or: my_project.datatrawl_plugins.my_analyzer
+
+datatrawl list analyzers --plugin "$PLUGIN"
+datatrawl doctor --plugin "$PLUGIN" \
+  --telescope <instrument> --source <source> --reader <reader> --analyzer <name>
+datatrawl scan --plugin "$PLUGIN" \
+  --name <inventory> --analyzer <name> \
+  --max-files 1 --max-frames-per-file 1 \
+  --out smoke/my-analyzer.npz
 ```
 
-Then interrupt and rerun the identical command. It should skip completed units and avoid
-duplicating output rows.
+Run the identical smoke command a second time. It should skip the completed unit
+and avoid duplicating output. For the uncapped analysis, omit the bounds and use a
+fresh output path; capped and uncapped products are intentionally incompatible.

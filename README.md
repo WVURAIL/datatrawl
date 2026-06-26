@@ -243,6 +243,10 @@ A strong narrow feature should appear in the freq_id-844 band at about
 Re-run the identical `scan` command to verify resume. It should report that the
 product is already complete.
 
+Because this example uses `--max-frames-per-file 5`, the product is deliberately
+bounded. For a later uncapped scan, remove the cap and use a fresh `--out` (or
+delete the bounded product); `datatrawl` refuses to mix capped and uncapped runs.
+
 On a headless session, such as a CANFAR script rather than a notebook cell,
 `plt.show()` may do nothing. The important call is `plt.savefig(...)`.
 
@@ -299,11 +303,21 @@ my_dtv_project/
             fstat_detector.py
 ```
 
-During development, load the analyzer directly by file path:
+A self-contained analyzer can be loaded directly by file path:
 
 ```bash
 datatrawl list analyzers \
   --plugin /path/to/my_dtv_project/my_dtv_project/datatrawl_plugins/fstat_detector.py
+```
+
+A file loaded this way is standalone and cannot use package-relative imports. If
+the analyzer imports sibling modules or shared helpers, install the project and
+load the analyzer by dotted module name instead:
+
+```bash
+pip install -e /path/to/my_dtv_project
+datatrawl list analyzers \
+  --plugin my_dtv_project.datatrawl_plugins.fstat_detector
 ```
 
 Then run a readiness check for the concrete pipeline:
@@ -318,7 +332,7 @@ datatrawl doctor \
 ```
 
 After you have surveyed an inventory, run a one-file smoke test before scaling
-up:
+up. Keep its bounded product separate from the full run:
 
 ```bash
 datatrawl scan \
@@ -327,11 +341,14 @@ datatrawl scan \
   --analyzer fstat-detector \
   --select 844 \
   --max-files 1 \
-  --max-frames-per-file 1
+  --max-frames-per-file 1 \
+  --out smoke/fstat-detector-844.npz
 ```
 
-Then interrupt and rerun the identical command. It should skip completed units
-and avoid duplicating output.
+Run the identical command a second time. It should report that there is nothing
+to do and should not duplicate output. For a partial-resume test, run a larger
+bounded scan, interrupt it after a checkpoint, and rerun the same command. Use a
+fresh output path for the later uncapped analysis.
 
 Once the project is packaged, expose the plugin through an entry point in your
 project's `pyproject.toml`:
@@ -341,6 +358,12 @@ project's `pyproject.toml`:
 fstat-detector = "my_dtv_project.datatrawl_plugins.fstat_detector"
 ```
 
+Install or reinstall the project so the entry-point metadata is available:
+
+```bash
+pip install -e /path/to/my_dtv_project
+```
+
 After that, `datatrawl` can discover the plugin without `--plugin`:
 
 ```bash
@@ -348,7 +371,7 @@ datatrawl list analyzers
 datatrawl scan --name <survey-name> --analyzer fstat-detector --select 844
 ```
 
-For a concrete external analyzer reference, see 
+For a concrete external analyzer reference, see
 [`examples/external_analyzer.py`](examples/external_analyzer.py).
 
 It lives outside `src/datatrawl/` and is loaded the same way a user project would

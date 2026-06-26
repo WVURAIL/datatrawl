@@ -1,8 +1,10 @@
 """
-Worked external-analyzer example:
-an analyzer that lives OUTSIDE src/datatrawl/, the way a user's own analysis would.
-test_external_plugin.py loads it to prove the external-plugin path works; it doubles as a 
-concrete reference for the pattern in docs/ADDING_AN_ANALYZER.md.
+Worked external-analyzer example.
+
+This analyzer lives outside `src/datatrawl/`, the way a user's own analysis
+would. `tests/test_external_plugin.py` loads it to prove the external-plugin
+path works; it also serves as the concrete reference for
+`docs/ADDING_AN_ANALYZER.md`.
 
 It is loaded into datatrawl at runtime via any of:
 
@@ -14,14 +16,15 @@ It is loaded into datatrawl at runtime via any of:
     #   freq_id-peak = "mypkg.your_analyzer"
 
 Once loaded, `@analyzer` registers it and it is first-class: it shows up in
-`datatrawl list analyzers` / `doctor` and runs through the full engine (per-freq_id
-fan-out, dedup, quarantine, self-heal/resume, checkpointing) exactly like a
-built-in. This is how you keep your science in your own repo while still using the
-shared tool's machinery -- a real analysis (e.g. an F-statistic detector) follows
-the same shape.
+`datatrawl list analyzers` / `doctor` and runs through the full engine
+(per-freq_id fan-out, dedup, quarantine, self-heal/resume, checkpointing) exactly
+like a built-in. This is how you keep your science in your own repo while still
+using the shared tool's machinery -- a real analysis such as an F-statistic
+detector follows the same shape.
 
-It also shows reading an analyzer-specific parameter from ctx.options, set on the
-command line with `--set key=value` (here: `--set dc_mask_hz=...`).
+It also shows reading an analyzer-specific parameter from `ctx.options`, set on
+the command line with `--set key=value` (here: `--set dc_mask_hz=...`), and
+rejecting a resume when that parameter or an engine-level invariant changes.
 """
 from __future__ import annotations
 
@@ -86,6 +89,31 @@ class FreqIdPeakAnalyzer(Analyzer):
     def plan_runs(self, ctx: RunContext, spec: Any) -> list:
         return [[ch] for ch in _freq_ids(spec)]
 
+    @staticmethod
+    def _expected_freq_id(ctx: RunContext):
+        sel = ctx.selection
+        if isinstance(sel, int):
+            return int(sel)
+        if isinstance(sel, (list, tuple)) and len(sel) == 1:
+            return int(sel[0])
+        return None
+
+    @staticmethod
+    def _run_cap(ctx: RunContext) -> int:
+        value = (ctx.options or {}).get("max_frames_per_file")
+        return int(value) if value else -1
+
+    @staticmethod
+    def _run_mask(ctx: RunContext) -> float:
+        return float((ctx.options or {}).get("dc_mask_hz", 0.0) or 0.0)
+
+    @staticmethod
+    def _mismatch(path: str, label: str, saved, current) -> None:
+        raise SystemExit(
+            f"{path} was built with {label}={saved}, but this run uses "
+            f"{label}={current}. Use a fresh product (--out elsewhere)."
+        )
+
     def __init__(self) -> None:
         self._psd_sum = None
         self._count = 0
@@ -93,23 +121,61 @@ class FreqIdPeakAnalyzer(Analyzer):
         self._files: list = []
         self._meta = {}
         self._dc_mask_hz = 0.0
+        self._max_frames = -1
 
     # -- resume --------------------------------------------------------------
     def resume(self, path: str, ctx: RunContext) -> bool:
         if not os.path.exists(path):
             return False
         z = np.load(path, allow_pickle=False)
-        if str(z.get("analysis")) != _SIGNATURE:
-            raise SystemExit(f"{path} was written by analysis "
-                             f"{str(z.get('analysis'))!r}, not {_SIGNATURE!r}; "
-                             f"refusing to mix products. Use a different --out.")
+        if "analysis" not in z.files or str(z["analysis"]) != _SIGNATURE:
+            found = str(z["analysis"]) if "analysis" in z.files else "missing"
+            raise SystemExit(f"{path} was written by analysis {found!r}, not "
+                             f"{_SIGNATURE!r}; refusing to mix products. "
+                             f"Use a different --out.")
+
+        expected_freq_id = self._expected_freq_id(ctx)
+        if expected_freq_id is not None and int(z["freq_id"]) != expected_freq_id:
+            self._mismatch(path, "freq_id", int(z["freq_id"]), expected_freq_id)
+
+        current_nfft = int(getattr(ctx.instrument, "nfft", 0) or 0)
+        if current_nfft and int(z["nfft"]) != current_nfft:
+            self._mismatch(path, "nfft", int(z["nfft"]), current_nfft)
+
+        current_fs = float(ctx.instrument.fs_hz)
+        if abs(float(z["fs_hz"]) - current_fs) > 1.0:
+            self._mismatch(path, "fs_hz", float(z["fs_hz"]), current_fs)
+
+        current_zone = int(getattr(ctx.instrument, "nyquist_zone", 1) or 1)
+        if int(z["nyquist_zone"]) != current_zone:
+            self._mismatch(path, "nyquist_zone", int(z["nyquist_zone"]), current_zone)
+
+        saved_cap = (int(z["max_frames_per_file"])
+                     if "max_frames_per_file" in z.files else -1)
+        current_cap = self._run_cap(ctx)
+        if saved_cap != current_cap:
+            self._mismatch(
+                path,
+                "max_frames_per_file",
+                saved_cap if saved_cap >= 0 else "none",
+                current_cap if current_cap >= 0 else "none",
+            )
+
+        saved_mask = float(z["dc_mask_hz"])
+        current_mask = self._run_mask(ctx)
+        if abs(saved_mask - current_mask) > 1e-9:
+            self._mismatch(path, "dc_mask_hz", saved_mask, current_mask)
+
         self._psd_sum = np.asarray(z["psd_sum"], dtype=np.float64)
         self._count = int(z["count"])
-        self._keys = list(np.asarray(z["unit_keys"]).tolist())
-        self._files = list(np.asarray(z["files"]).tolist())
+        self._keys = [str(x) for x in np.asarray(z["unit_keys"]).tolist()]
+        self._files = [str(x) for x in np.asarray(z["files"]).tolist()]
         self._meta = {"nfft": int(z["nfft"]), "fs_hz": float(z["fs_hz"]),
                       "f_center_hz": float(z["f_center_hz"]),
-                      "nyquist_zone": int(z["nyquist_zone"]), "freq_id": int(z["freq_id"])}
+                      "nyquist_zone": int(z["nyquist_zone"]),
+                      "freq_id": int(z["freq_id"])}
+        self._dc_mask_hz = saved_mask
+        self._max_frames = saved_cap
         return True
 
     def processed_keys(self) -> set:
@@ -117,25 +183,46 @@ class FreqIdPeakAnalyzer(Analyzer):
 
     # -- lifecycle -----------------------------------------------------------
     def begin(self, ctx: RunContext, first_meta: Mapping[str, Any]) -> None:
-        if not self._meta:
-            ch = ctx.selection[0] if isinstance(ctx.selection, (list, tuple)) \
-                else ctx.selection
-            self._meta = {
-                "nfft": int(getattr(ctx.instrument, "nfft", 0)),
-                "fs_hz": float(ctx.instrument.fs_hz),
-                "f_center_hz": float(first_meta.get("f_center_hz", 0.0)),
-                "nyquist_zone": int(getattr(ctx.instrument, "nyquist_zone", 1)),
-                "freq_id": int(ch) if ch is not None else -1,
-            }
-        self._dc_mask_hz = float((ctx.options or {}).get("dc_mask_hz", 0.0) or 0.0)
+        f_center = first_meta.get("f_center_hz")
+        if self._meta:
+            if (f_center is not None
+                    and abs(float(f_center) - self._meta["f_center_hz"]) > 1.0):
+                self._mismatch(
+                    "resumed product",
+                    "f_center_hz",
+                    self._meta["f_center_hz"],
+                    float(f_center),
+                )
+            return
+
+        ch = self._expected_freq_id(ctx)
+        self._meta = {
+            "nfft": int(getattr(ctx.instrument, "nfft", 0)),
+            "fs_hz": float(ctx.instrument.fs_hz),
+            "f_center_hz": float(f_center or 0.0),
+            "nyquist_zone": int(getattr(ctx.instrument, "nyquist_zone", 1)),
+            "freq_id": ch if ch is not None else -1,
+        }
+        self._dc_mask_hz = self._run_mask(ctx)
+        self._max_frames = self._run_cap(ctx)
 
     def consume_file(self, arrays: Iterable, meta: Mapping[str, Any]) -> int:
         n = 0
         for frame in arrays:
-            x = np.asarray(frame)                      # [nfft, n_feeds] complex
+            x = np.asarray(frame)
+            expected_nfft = int(self._meta.get("nfft", 0) or 0)
+            if expected_nfft and x.shape[0] != expected_nfft:
+                raise SystemExit(
+                    f"{meta.get('unit_name', '?')} has frame length {x.shape[0]}, "
+                    f"but this product uses nfft={expected_nfft}."
+                )
             w = np.hanning(x.shape[0]).astype(np.float64)
-            X = np.fft.fft(x * w[:, None], axis=0)
-            p = np.fft.fftshift((X.real**2 + X.imag**2).mean(axis=1))
+            w = w.reshape((-1,) + (1,) * (x.ndim - 1))
+            X = np.fft.fft(x * w, axis=0)
+            power = X.real**2 + X.imag**2
+            if power.ndim > 1:
+                power = power.mean(axis=tuple(range(1, power.ndim)))
+            p = np.fft.fftshift(power)
             self._psd_sum = p if self._psd_sum is None else self._psd_sum + p
             self._count += 1
             n += 1
@@ -150,7 +237,9 @@ class FreqIdPeakAnalyzer(Analyzer):
 
     def save(self, path: str) -> None:
         freqs = self._freqs_hz()
-        psd = self._psd_sum / max(self._count, 1)
+        psd_sum = (self._psd_sum if self._psd_sum is not None
+                   else np.zeros_like(freqs))
+        psd = psd_sum / max(self._count, 1)
         masked = psd.copy()
         if self._dc_mask_hz > 0:
             masked[np.abs(freqs) < self._dc_mask_hz] = -np.inf
@@ -159,19 +248,25 @@ class FreqIdPeakAnalyzer(Analyzer):
         os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
         fd, tmp = tempfile.mkstemp(suffix=".npz", dir=os.path.dirname(path) or ".")
         os.close(fd)
-        np.savez_compressed(
-            tmp,
-            analysis=_SIGNATURE,
-            psd_sum=self._psd_sum, count=self._count,
-            freqs_hz=freqs, peak_hz=float(freqs[k]),
-            peak_sky_hz=float(f_center + nyquist_sign(nz) * freqs[k]),
-            f_center_hz=f_center, freq_id=self._meta["freq_id"],
-            nfft=self._meta["nfft"], fs_hz=self._meta["fs_hz"], nyquist_zone=nz,
-            dc_mask_hz=self._dc_mask_hz,
-            files=np.array(self._files), unit_keys=np.array(self._keys),
-            created=datetime.datetime.now(datetime.timezone.utc).isoformat(),
-        )
-        os.replace(tmp, path)
+        try:
+            np.savez_compressed(
+                tmp,
+                analysis=_SIGNATURE,
+                psd_sum=psd_sum, count=self._count,
+                freqs_hz=freqs, peak_hz=float(freqs[k]),
+                peak_sky_hz=float(f_center + nyquist_sign(nz) * freqs[k]),
+                f_center_hz=f_center, freq_id=self._meta["freq_id"],
+                nfft=self._meta["nfft"], fs_hz=self._meta["fs_hz"], nyquist_zone=nz,
+                max_frames_per_file=self._max_frames,
+                dc_mask_hz=self._dc_mask_hz,
+                files=np.array(self._files), unit_keys=np.array(self._keys),
+                created=datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            )
+            os.replace(tmp, path)
+        except BaseException:
+            if os.path.exists(tmp):
+                os.remove(tmp)
+            raise
 
     def summary(self) -> dict:
         freqs = self._freqs_hz() if self._meta else np.zeros(1)

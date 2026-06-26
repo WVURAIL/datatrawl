@@ -8,12 +8,12 @@ can resume. The mechanical parts of that -- a crash-safe atomic write, reloading
 on resume, and tracking which files are already in the product -- are identical
 everywhere, so they live here. Subclass and write only the science:
 
-	__init__()                    allocate neutral accumulator state
-	begin(ctx, first_meta)        capture first-file/run metadata without
-        	                      overwriting restored accumulator state
-	consume_file(arrays, meta)    fold in one file; call self._record(meta)
-	_product()                    return fields to persist
-	_restore(z)                   restore accumulators from a loaded product
+    __init__()                    allocate neutral accumulator state
+    begin(ctx, first_meta)        capture first-file/run metadata without
+                                  overwriting restored accumulator state
+    consume_file(arrays, meta)    fold in one file; call self._record(meta)
+    _product()                    return fields to persist
+    _restore(z)                   restore accumulators from a loaded product
 
 `save()`, `resume()`, and `processed_keys()` then come for free. An analysis that
 needs custom resume validation or derived fields at save time (see the `spectrum`

@@ -70,11 +70,21 @@ means "some fetches failed"; re-run to sweep them up.
 
 ### A file won't parse (quarantine)
 A file that downloads but won't parse (corrupt/truncated HDF5) is deterministically
-bad, so re-fetching won't help. datatrawl quarantines it to
-`results/<telescope>/quarantine.jsonl` and excludes it from every future run, so
-one bad file can't stall a pull (the scan still exits 0). Review with `cat`;
-re-admit by deleting its line and re-running; or `--no-quarantine` to treat
-unreadable files as hard failures.
+bad, so re-fetching usually won't help. datatrawl records it in
+`results/<telescope>/quarantine.jsonl` and excludes it from future runs. A probe
+failure occurs before reduction and can be skipped immediately. A streaming read
+failure may happen after the analyzer has accumulated partial in-memory state, so
+datatrawl records the quarantine and aborts without checkpointing; rerun the same
+command to resume from the last clean checkpoint and skip that file.
+
+Review the ledger with `cat`. Re-admit a file by deleting its line and rerunning,
+or use `--no-quarantine` to treat unreadable files as hard failures.
+
+### An analyzer raises an exception
+An unexpected exception from an analyzer is a run-level error, not evidence that
+the input file is corrupt. The scan stops, the file is not added to the quarantine
+ledger, and the in-memory changes since the last checkpoint are not saved. Fix the
+analyzer and rerun the same command; resume starts from the last completed checkpoint.
 
 ### Are duplicates a problem?
 No -- they're ruled out at three layers: `survey` dedups by physical `cadc:` URI,
@@ -83,8 +93,11 @@ product. A file is fetched and reduced at most once even if it appears in severa
 scopes.
 
 ### `error: <product> was built with <param>=... but this run uses ...`
-You changed an analyzer parameter (`--set bracket_hz=...`) on an existing product;
-the analyzer won't mix two windows into one. Write the new run to a fresh `--out`.
+You changed an analyzer parameter (`--set bracket_hz=...`) or an engine-level
+invariant on an existing product. A common case is trying to continue a bounded
+`--max-frames-per-file` smoke-test product with an uncapped run. The analyzer will
+not mix incompatible runs; write the new run to a fresh `--out` (or remove the
+smoke-test product if it is no longer needed).
 
 ### New data landed since you surveyed
 Re-run `survey` to refresh the inventory, then scan -- files already in your

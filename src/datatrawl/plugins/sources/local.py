@@ -62,14 +62,17 @@ class LocalDirectorySource(DataSource):
         freq_id_re = re.compile(o.get("source_freq_id_regex") or r"_(\d+)\.h5$")
         units: List[Unit] = []
         for p in paths:
+            src_path = os.path.abspath(p)
             name = os.path.basename(p)
-            if wanted is not None:
-                m = freq_id_re.search(name)
-                fid = int(m.group(1)) if m else None
-                if fid not in wanted:
-                    continue
-            units.append(Unit(key=os.path.abspath(p), name=name,
-                              meta={"src_path": os.path.abspath(p)}))
+            match = freq_id_re.search(name)
+            freq_id = int(match.group(1)) if match else None
+            if wanted is not None and freq_id not in wanted:
+                continue
+            meta: dict[str, object] = {"src_path": src_path}
+            if freq_id is not None:
+                # `explore` reads this metadata to summarize the available bands.
+                meta["freq_id"] = freq_id
+            units.append(Unit(key=src_path, name=name, meta=meta))
         return units
 
     def fetch(self, unit: Unit, dest: str) -> tuple[bool, str]:

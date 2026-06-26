@@ -2,11 +2,13 @@
 """
 External-plugin discovery test.
 
-Proves an analyzer that lives OUTSIDE src/datatrawl/ (here the fixture
+Proves an analyzer that lives OUTSIDE src/datatrawl/ (here
 examples/external_analyzer.py) is:
-  * NOT visible as a built-in (a plain scan can't find it), and
+  * NOT visible as a built-in (a plain scan can't find it),
   * fully usable once loaded via `--plugin <path>` OR the DATATRAWL_PLUGINS env
-    var, running through the real engine and honouring a `--set` parameter.
+    var, running through the real engine and honouring a `--set` parameter, and
+  * strict about resume compatibility, including analyzer options and capped
+    smoke-test products.
 
 Each case runs in a FRESH interpreter (subprocess `python -m datatrawl.cli`) so the
 registry starts empty -- exactly a real user's situation.
@@ -58,7 +60,7 @@ def _scan_argv(lib, root, tmp, extra=None):
             "--tmp-dir", tmp, "--checkpoint-every", "1"] + (extra or [])
 
 
-def _product_ok(root, dc_mask_expected) -> bool:
+def _product_ok(root, dc_mask_expected, cap_expected=-1, files_expected=3) -> bool:
     p = os.path.join(root, "results", "chime", "freq_id-peak", f"{FREQ_ID}.npz")
     if not os.path.exists(p):
         print(f"  FAIL: product not written at {p}")
@@ -73,9 +75,19 @@ def _product_ok(root, dc_mask_expected) -> bool:
     if abs(float(z["dc_mask_hz"]) - dc_mask_expected) > 1e-9:
         print(f"  FAIL: dc_mask_hz {float(z['dc_mask_hz'])} != {dc_mask_expected} "
               "(--set did not reach ctx.options)"); ok = False
+    if int(z["max_frames_per_file"]) != cap_expected:
+        print(f"  FAIL: max_frames_per_file {int(z['max_frames_per_file'])} "
+              f"!= {cap_expected}"); ok = False
+    if int(z["files"].size) != files_expected:
+        print(f"  FAIL: files {int(z['files'].size)} != {files_expected}"); ok = False
     if int(z["freq_id"]) != FREQ_ID:
         print(f"  FAIL: freq_id {int(z['freq_id'])}"); ok = False
     return ok
+
+
+def _rejected(r, parameter: str) -> bool:
+    text = r.stdout + r.stderr
+    return r.returncode != 0 and parameter in text
 
 
 def run_external_plugin() -> int:
@@ -127,6 +139,39 @@ def run_external_plugin() -> int:
         ok = False
     else:
         print("  discovery: 'freq_id-peak' appears in `list analyzers` once loaded")
+
+    # 5. Analyzer-specific options are product invariants, even for a complete run.
+    r = _run(_scan_argv(lib, root2, tmp,
+                        extra=["--plugin", PLUGIN, "--set", "dc_mask_hz=100"]))
+    if not _rejected(r, "dc_mask_hz"):
+        print("  FAIL: changed dc_mask_hz did not reject resume")
+        ok = False
+    else:
+        print("  resume validation: changed dc_mask_hz rejected")
+
+    # 6. A capped smoke product can resume with the same cap, but not uncapped.
+    root4 = os.path.join(work, "capped")
+    capped = ["--plugin", PLUGIN, "--set", "dc_mask_hz=25",
+              "--max-frames-per-file", "1"]
+    r = _run(_scan_argv(lib, root4, tmp, extra=capped + ["--max-files", "1"]))
+    if r.returncode != 0 or not _product_ok(root4, 25.0, 1, 1):
+        print(f"  FAIL: capped one-file scan failed\n{r.stderr[-400:]}")
+        ok = False
+
+    r = _run(_scan_argv(lib, root4, tmp, extra=capped))
+    if r.returncode != 0 or not _product_ok(root4, 25.0, 1, 3):
+        print(f"  FAIL: matching capped resume failed\n{r.stderr[-400:]}")
+        ok = False
+    else:
+        print("  resume validation: matching capped run completed the product")
+
+    r = _run(_scan_argv(lib, root4, tmp,
+                        extra=["--plugin", PLUGIN, "--set", "dc_mask_hz=25"]))
+    if not _rejected(r, "max_frames_per_file"):
+        print("  FAIL: uncapped run accepted a capped product")
+        ok = False
+    else:
+        print("  resume validation: capped -> uncapped rejected")
 
     print("EXTERNAL PLUGIN SELF-TEST PASSED" if ok
           else "EXTERNAL PLUGIN SELF-TEST FAILED")

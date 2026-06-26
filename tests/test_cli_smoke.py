@@ -59,6 +59,27 @@ def test_doctor_full_combo_reports_telescope_readiness():
     assert "Nyquist zone set" in r.stdout       # the telescope check actually ran
 
 
+def test_doctor_and_explore_accept_plugin_set_options():
+    import datatrawl.cli as cli
+
+    parser = cli.build_parser()
+    for command in ("doctor", "explore"):
+        args = parser.parse_args(
+            [command, "--set", "threshold=3.5", "--set", "enabled=true"]
+        )
+        options = cli._parse_set_options(args.set_opts)
+        assert options["threshold"] == 3.5
+        assert options["enabled"] is True
+
+
+def test_survey_reports_on_demand_source_cleanly():
+    r = _run("survey", "--telescope", "chime", "--source", "local")
+    text = r.stdout + r.stderr
+    assert r.returncode == 2
+    assert "enumerates on demand" in text
+    assert "Traceback" not in text
+
+
 if __name__ == "__main__":
     for fn in sorted(k for k in dict(globals()) if k.startswith("test_")):
         globals()[fn]()

@@ -42,12 +42,17 @@ class MySource(DataSource):
             my_download(unit.key, dest)
             return True, ""
         except Exception as exc:
-            return False, str(exc)         # the engine retries / quarantines
+            return False, str(exc)         # logged now; retried when the scan is rerun
 ```
 
 `survey()` is optional: implement it when `enumerate()` is expensive (a network listing) so
 `datatrawl survey` can cache the inventory to disk and later steps reuse it without
-re-listing. A cheap source can leave it unimplemented and just enumerate on demand.
+re-listing. A cheap source can leave it unimplemented and just enumerate on demand through
+`datatrawl explore` and `datatrawl scan`. Running `datatrawl survey` for such a source reports
+that a persistent survey is not implemented.
+
+Source-specific settings can be passed through `ctx.options` with repeated `--set key=value`
+arguments on `survey`, `explore`, and `doctor`.
 
 ## A different archive layout
 
@@ -65,9 +70,10 @@ References: `src/datatrawl/plugins/sources/local.py` (a minimal source) and
 
 ## Registering and loading
 
-The same for all four piece types. In-tree: drop the module in `plugins/sources/` and add
-it to the import list in `plugins/__init__.py`. In your own project (recommended for
-project-specific work) keep it in your repo and load it with:
+The loading mechanism is the same for source, reader, and analyzer plugins. In-tree: drop
+the module in `plugins/sources/` and add it to the import list in `plugins/__init__.py`. In
+your own project (recommended for project-specific work), keep it in your repo and load it
+with:
 
 ```bash
 datatrawl scan --plugin /path/to/my_source.py ...
@@ -78,5 +84,6 @@ export DATATRAWL_PLUGINS=/path/to/my_source.py
 #   my-source = "mypkg.my_source"
 ```
 
-Once loaded it shows up in `datatrawl list` / `doctor` and runs through the same engine
-(staging, dedup, quarantine, resume) as a built-in.
+After adding an entry point, install or reinstall the package (`pip install -e .`) so its
+metadata is visible. Once loaded, the source shows up in `datatrawl list` / `doctor` and
+runs through the same engine (staging, dedup, quarantine, resume) as a built-in.
