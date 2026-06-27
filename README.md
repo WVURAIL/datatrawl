@@ -1,8 +1,12 @@
-# datatrawl
+<p align="center">
+  <img src="assets/logo-banner.svg" alt="datatrawl — storage-safe archive trawling for resumable telescope-data analysis" width="820">
+</p>
 
-[![tests](https://github.com/WVURAIL/datatrawl/actions/workflows/tests.yml/badge.svg)](https://github.com/WVURAIL/datatrawl/actions/workflows/tests.yml)
-[![python](https://img.shields.io/badge/python-3.9%2B-blue.svg)](https://www.python.org/downloads/)
-[![license: MIT](https://img.shields.io/badge/license-MIT-yellow.svg)](LICENSE)
+<p align="center">
+  <a href="https://github.com/WVURAIL/datatrawl/actions/workflows/tests.yml"><img src="https://github.com/WVURAIL/datatrawl/actions/workflows/tests.yml/badge.svg" alt="tests"></a>
+  <a href="https://www.python.org/downloads/"><img src="https://img.shields.io/badge/python-3.9%2B-blue.svg" alt="python 3.9+"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-yellow.svg" alt="license: MIT"></a>
+</p>
 
 Storage-safe archive trawling for resumable telescope-data analysis.
 
@@ -31,6 +35,10 @@ Datatrail scope(s)
 ```
 
 ## The four pieces
+
+<p align="center">
+  <img src="assets/architecture.svg" alt="A datatrawl run: instrument, source, and reader are provided; you write the analyzer. The fixed engine streams each file through them and fans out one small product per channel." width="900">
+</p>
 
 | Piece | Meaning |
 |---|---|
