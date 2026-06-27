@@ -1,0 +1,115 @@
+<svg width="1120" height="520" viewBox="0 0 1120 520" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="datatrawl architecture: four pieces feed one fixed engine that emits one product per channel">
+  <defs>
+    <linearGradient id="panel" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0f2c47"/>
+      <stop offset="1" stop-color="#0a1726"/>
+    </linearGradient>
+    <marker id="ah" markerWidth="9" markerHeight="9" refX="6.5" refY="3" orient="auto"><path d="M0 0 L6.5 3 L0 6 Z" fill="#4fd0e0"/></marker>
+    <marker id="aha" markerWidth="9" markerHeight="9" refX="6.5" refY="3" orient="auto"><path d="M0 0 L6.5 3 L0 6 Z" fill="#f6a623"/></marker>
+    <style>
+      .h  { font-family: system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; }
+      .m  { font-family: ui-monospace, 'SFMono-Regular', 'JetBrains Mono', Menlo, Consolas, monospace; }
+    </style>
+  </defs>
+
+  <rect x="0.75" y="0.75" width="1118.5" height="518.5" rx="26" fill="url(#panel)" stroke="#4fd0e0" stroke-opacity="0.2" stroke-width="1.5"/>
+
+  <!-- titles -->
+  <text class="h" x="40" y="52" font-size="30" font-weight="700" fill="#e6f3fb">How a run works</text>
+  <text class="h" x="40" y="80" font-size="16" fill="#8aa6bf">four pieces → one fixed engine → one product per channel</text>
+
+  <!-- four choice chips -->
+  <!-- instrument -->
+  <rect x="250" y="104" width="136" height="52" rx="11" fill="#11324d" stroke="#4fd0e0" stroke-opacity="0.45" stroke-width="1.2"/>
+  <text class="h" x="318" y="128" font-size="17" font-weight="700" fill="#7fe3e8" text-anchor="middle">instrument</text>
+  <text class="h" x="318" y="145" font-size="11.5" fill="#9fc2d6" text-anchor="middle">telescope geometry</text>
+  <!-- source -->
+  <rect x="418" y="104" width="136" height="52" rx="11" fill="#11324d" stroke="#4fd0e0" stroke-opacity="0.45" stroke-width="1.2"/>
+  <text class="h" x="486" y="128" font-size="17" font-weight="700" fill="#7fe3e8" text-anchor="middle">source</text>
+  <text class="h" x="486" y="145" font-size="11.5" fill="#9fc2d6" text-anchor="middle">where data lives</text>
+  <!-- reader -->
+  <rect x="586" y="104" width="136" height="52" rx="11" fill="#11324d" stroke="#4fd0e0" stroke-opacity="0.45" stroke-width="1.2"/>
+  <text class="h" x="654" y="128" font-size="17" font-weight="700" fill="#7fe3e8" text-anchor="middle">reader</text>
+  <text class="h" x="654" y="145" font-size="11.5" fill="#9fc2d6" text-anchor="middle">file → arrays</text>
+  <!-- analyzer (yours) -->
+  <rect x="754" y="104" width="136" height="52" rx="11" fill="#33260f" stroke="#f6a623" stroke-opacity="0.7" stroke-width="1.3"/>
+  <text class="h" x="822" y="128" font-size="17" font-weight="700" fill="#fbbf24" text-anchor="middle">analyzer</text>
+  <text class="h" x="822" y="145" font-size="11.5" fill="#e7b35e" text-anchor="middle">arrays → product</text>
+
+  <!-- down arrows into engine -->
+  <line x1="318" y1="156" x2="318" y2="193" stroke="#4fd0e0" stroke-width="1.6" marker-end="url(#ah)"/>
+  <line x1="486" y1="156" x2="486" y2="193" stroke="#4fd0e0" stroke-width="1.6" marker-end="url(#ah)"/>
+  <line x1="654" y1="156" x2="654" y2="193" stroke="#4fd0e0" stroke-width="1.6" marker-end="url(#ah)"/>
+  <line x1="822" y1="156" x2="822" y2="193" stroke="#f6a623" stroke-width="1.6" marker-end="url(#aha)"/>
+
+  <!-- engine -->
+  <rect x="250" y="196" width="640" height="180" rx="16" fill="#0e2942" stroke="#4fd0e0" stroke-opacity="0.5" stroke-width="1.5"/>
+  <text class="h" x="270" y="224" font-size="18" font-weight="700" fill="#cfe7f2">streaming engine</text>
+  <text class="h" x="270" y="243" font-size="12.5" fill="#8aa6bf">the fixed part — you don't touch this</text>
+
+  <!-- pipeline pills -->
+  <g>
+    <rect x="270" y="258" width="92" height="40" rx="9" fill="#0a2235" stroke="#4fd0e0" stroke-opacity="0.45"/>
+    <text class="m" x="316" y="283" font-size="13" fill="#9fe8ec" text-anchor="middle">fetch</text>
+    <rect x="384" y="258" width="92" height="40" rx="9" fill="#0a2235" stroke="#4fd0e0" stroke-opacity="0.45"/>
+    <text class="m" x="430" y="283" font-size="13" fill="#9fe8ec" text-anchor="middle">read</text>
+    <rect x="498" y="258" width="92" height="40" rx="9" fill="#0a2235" stroke="#4fd0e0" stroke-opacity="0.45"/>
+    <text class="m" x="544" y="283" font-size="13" fill="#bdf3f5" text-anchor="middle">analyze</text>
+    <rect x="612" y="258" width="92" height="40" rx="9" fill="#0a2235" stroke="#4fd0e0" stroke-opacity="0.45"/>
+    <text class="m" x="658" y="283" font-size="13" fill="#9fe8ec" text-anchor="middle">delete</text>
+    <rect x="726" y="258" width="120" height="40" rx="9" fill="#0a2235" stroke="#4fd0e0" stroke-opacity="0.45"/>
+    <text class="m" x="786" y="283" font-size="13" fill="#9fe8ec" text-anchor="middle">checkpoint</text>
+    <!-- between-pill arrows -->
+    <line x1="362" y1="278" x2="383" y2="278" stroke="#4fd0e0" stroke-width="1.4" marker-end="url(#ah)"/>
+    <line x1="476" y1="278" x2="497" y2="278" stroke="#4fd0e0" stroke-width="1.4" marker-end="url(#ah)"/>
+    <line x1="590" y1="278" x2="611" y2="278" stroke="#4fd0e0" stroke-width="1.4" marker-end="url(#ah)"/>
+    <line x1="704" y1="278" x2="725" y2="278" stroke="#4fd0e0" stroke-width="1.4" marker-end="url(#ah)"/>
+  </g>
+
+  <!-- per-file loop -->
+  <path d="M786 301 C 786 333, 316 333, 316 315 L 316 303" fill="none" stroke="#6fb6c9" stroke-width="1.4" stroke-dasharray="4 3" opacity="0.8" marker-end="url(#ah)"/>
+  <text class="m" x="551" y="352" font-size="11.5" fill="#9fc2d6" text-anchor="middle">repeat per file — disk stays at one file, memory flat</text>
+
+  <!-- archive (the sea of data) -->
+  <text class="h" x="60" y="210" font-size="16" font-weight="700" fill="#7fe3e8">archive</text>
+  <g stroke="#4fd0e0" stroke-opacity="0.4" stroke-width="1.1">
+    <rect x="96" y="222" width="84" height="60" rx="7" fill="#102a40"/>
+    <rect x="88" y="234" width="84" height="60" rx="7" fill="#112d46"/>
+    <rect x="80" y="246" width="84" height="60" rx="7" fill="#123150"/>
+    <rect x="72" y="258" width="84" height="60" rx="7" fill="#13344f"/>
+  </g>
+  <!-- front file with detail -->
+  <path d="M64 270 h66 l18 18 v42 a0 0 0 0 1 0 0 h-84 a0 0 0 0 1 0 0 z" fill="#16385a" stroke="#5fd6e6" stroke-opacity="0.6" stroke-width="1.2"/>
+  <path d="M130 270 v18 h18" fill="none" stroke="#5fd6e6" stroke-opacity="0.6" stroke-width="1.2"/>
+  <g class="m" fill="#7fbfd0" font-size="7.5" opacity="0.85">
+    <text x="74" y="298">baseband</text>
+    <text x="74" y="310">ch 0614</text>
+    <text x="74" y="322">.h5</text>
+  </g>
+  <text class="h" x="54" y="346" font-size="12" fill="#8aa6bf">Datatrail · CADC</text>
+  <text class="h" x="54" y="363" font-size="12" fill="#8aa6bf">thousands of files</text>
+
+  <!-- archive -> engine -->
+  <line x1="186" y1="288" x2="247" y2="288" stroke="#4fd0e0" stroke-width="1.7" marker-end="url(#ah)"/>
+
+  <!-- products fan-out -->
+  <text class="h" x="990" y="210" font-size="15" font-weight="700" fill="#7fe3e8" text-anchor="middle">one product / channel</text>
+  <text class="h" x="990" y="227" font-size="11.5" fill="#8aa6bf" text-anchor="middle">each a self-describing .npz</text>
+  <!-- fan arrows from engine right edge -->
+  <g stroke-width="1.5">
+    <path d="M890 286 C 905 286, 905 264, 908 264 L 920 264" fill="none" stroke="#4fd0e0" marker-end="url(#ah)"/>
+    <path d="M890 286 C 905 286, 905 312, 908 312 L 920 312" fill="none" stroke="#4fd0e0" marker-end="url(#ah)"/>
+    <path d="M890 286 C 905 286, 905 360, 908 360 L 920 360" fill="none" stroke="#f6a623" marker-end="url(#aha)"/>
+    <path d="M890 286 C 905 286, 905 408, 908 408 L 920 408" fill="none" stroke="#4fd0e0" stroke-opacity="0.6" marker-end="url(#ah)"/>
+  </g>
+  <!-- product cards -->
+  <rect x="924" y="244" width="132" height="40" rx="9" fill="#0e2942" stroke="#4fd0e0" stroke-opacity="0.5"/>
+  <text class="m" x="990" y="269" font-size="14" fill="#cfe7f2" text-anchor="middle">614.npz</text>
+  <rect x="924" y="292" width="132" height="40" rx="9" fill="#0e2942" stroke="#4fd0e0" stroke-opacity="0.5"/>
+  <text class="m" x="990" y="317" font-size="14" fill="#cfe7f2" text-anchor="middle">706.npz</text>
+  <rect x="924" y="340" width="132" height="40" rx="9" fill="#33260f" stroke="#f6a623" stroke-opacity="0.75"/>
+  <text class="m" x="980" y="365" font-size="14" fill="#fbbf24" text-anchor="middle">598.npz</text>
+  <circle cx="1036" cy="360" r="3" fill="#fbbf24"/>
+  <rect x="924" y="388" width="132" height="40" rx="9" fill="#0e2942" stroke="#4fd0e0" stroke-opacity="0.3" stroke-dasharray="4 3"/>
+  <text class="m" x="990" y="413" font-size="13" fill="#8aa6bf" text-anchor="middle">… 23 channels</text>
+</svg>
