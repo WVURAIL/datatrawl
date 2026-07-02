@@ -198,6 +198,15 @@ your combine depends on that order rather than accumulating commutatively.
 Against a local directory the same selection works via the filename-parsed
 event (`--source-event-regex`, default `baseband_(\d+)_`).
 
+Two conventions worth keeping: `--select` stays the *freq_id* restriction for a
+per-event analyzer -- it plans events itself, so reject an event-shaped
+`--select` with a pointer rather than letting it be misread. And when runs are
+gated on a companion (next section), plan from the companion table instead of
+the inventory: only calibratable events get runs, and the same analyzer then
+works unchanged against archive and local sources. The runnable reference for
+both is [`examples/per_event_companions.py`](../examples/per_event_companions.py),
+driven end to end through the CLI by `tests/test_per_event_scan.py`.
+
 ## Auxiliary inputs (gains, flags, companions)
 
 Some analyses need a small companion file per unit -- calibration gains to
@@ -229,6 +238,11 @@ If the companion is not small -- if you need bulk data staged *alongside* every
 unit -- you are fighting the one-file-at-a-time streaming model, and the honest
 answer is a different design (pre-combine the products upstream, or a
 different tool), not a bigger side-load.
+
+Steps 2--4 are worked, runnable, and CLI-tested in
+[`examples/per_event_companions.py`](../examples/per_event_companions.py):
+companion loaded in `begin()`, resolved off `meta["event"]`, stamped into the
+product, and a reassigned companion refusing the resume.
 
 ## Loading external analyzers
 

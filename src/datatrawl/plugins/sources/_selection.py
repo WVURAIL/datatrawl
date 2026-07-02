@@ -40,6 +40,8 @@ from typing import Any, FrozenSet, Mapping, Optional
 _ALL = ("", "all", "*")
 _EVENT_PREFIXES = ("events:", "event:")
 _DICT_KEYS = {"freq_ids", "events"}
+_GRAMMAR = ("a freq_id selection is an int, a collection of ints, '844', "
+            "'614,706', a range '506-844', or 'all'")
 
 
 def parse_freq_ids(sel) -> Optional[FrozenSet[int]]:
@@ -52,27 +54,49 @@ def parse_freq_ids(sel) -> Optional[FrozenSet[int]]:
       '844'                    -> {844}
       '614,706'                -> {614, 706}
       '506-844'                -> {506, 507, ..., 844}
+
+    Malformed input raises SystemExit (actionable, never a bare int()
+    traceback): a plan_runs typo must name itself, not surface as
+    `ValueError: invalid literal` three frames deep.
     """
     if sel is None:
         return None
     if isinstance(sel, int):
         return frozenset({sel})
     if isinstance(sel, (list, tuple, set, frozenset)):
-        # empty collection == no filter, matching the legacy "empty means all"
-        return frozenset(int(x) for x in sel) or None
+        try:
+            # empty collection == no filter, matching the legacy "empty means all"
+            return frozenset(int(x) for x in sel) or None
+        except (TypeError, ValueError):
+            raise SystemExit(f"malformed freq_id selection {sel!r}: {_GRAMMAR}")
     s = str(sel).strip().lower()
     if s in _ALL:
         return None
+    if s.startswith(_EVENT_PREFIXES):
+        # the one wrong-slot mistake worth naming: {"freq_ids": "events:..."}
+        raise SystemExit(
+            f"{sel!r} is an event selection in a freq_id slot -- events go in "
+            f"the 'events' key of a selection dict, or as the whole selection "
+            f"('--select events:...'), never inside 'freq_ids'")
     out: set = set()
     for part in s.split(","):
         part = part.strip()
         if not part:
             continue
-        if "-" in part:
-            lo, hi = part.split("-", 1)
-            out.update(range(int(lo), int(hi) + 1))
-        else:
-            out.add(int(part))
+        try:
+            if "-" in part:
+                lo, hi = (int(x) for x in part.split("-", 1))
+                if lo > hi:
+                    raise SystemExit(
+                        f"empty freq_id range {part!r} (low > high) -- a "
+                        f"reversed range would silently select every freq_id; "
+                        f"write it as '{hi}-{lo}'")
+                out.update(range(lo, hi + 1))
+            else:
+                out.add(int(part))
+        except ValueError:
+            raise SystemExit(f"malformed freq_id selection {sel!r} "
+                             f"(bad token {part!r}): {_GRAMMAR}")
     return frozenset(out) if out else None
 
 

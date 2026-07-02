@@ -78,6 +78,35 @@ def test_parse_selection_fails_loud():
         parse_selection("events:")
 
 
+@pytest.mark.parametrize("bad", [
+    "foo",                                  # not a freq_id at all
+    "506-844-900",                          # malformed range
+    "614,x",                                # one bad token in a list
+    ["614", "x"],                           # collection with a bad element
+    {"freq_ids": "506x"},                   # via the dict form
+])
+def test_malformed_freq_ids_are_actionable(bad):
+    # int() tracebacks are the failure mode this pins against: a plan_runs
+    # typo must name itself as a selection error, not a ValueError 3 frames in.
+    with pytest.raises(SystemExit) as ei:
+        parse_selection(bad)
+    assert "freq_id" in str(ei.value)
+
+
+def test_reversed_range_is_loud_not_select_all():
+    # '844-506' used to parse to an empty set == "no filter" == EVERYTHING --
+    # the one typo that turns a one-channel scan into an archive pull.
+    with pytest.raises(SystemExit) as ei:
+        parse_selection("844-506")
+    assert "844" in str(ei.value) and "506" in str(ei.value)
+
+
+def test_event_selection_in_freq_id_slot_names_the_mistake():
+    with pytest.raises(SystemExit) as ei:
+        parse_selection({"freq_ids": f"events:{EV_A}"})
+    assert "events" in str(ei.value)
+
+
 def test_exact_match_semantics():
     sel = parse_selection({"freq_ids": [614]})
     assert sel.wants_freq_id(614) and not sel.wants_freq_id(44)

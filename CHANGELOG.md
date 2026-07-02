@@ -16,10 +16,23 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - Per-event fan-out and auxiliary-input (gains/flags/companions) patterns
   documented in `docs/ADDING_AN_ANALYZER.md`, with a worked offline join in
   `examples/match_inventories.py`.
+- `examples/per_event_companions.py`: runnable reference for the per-event +
+  companion pattern (plan from the companion table, side-load in `begin()`,
+  companion identity stamped and resume-validated), driven end to end through
+  the CLI by `tests/test_per_event_scan.py` -- which also pins the join
+  example against the real gain-acquisition cadence that motivated it.
 - `survey --reader`: the reader whose archive file shape drives the survey,
   enabling inventories of non-baseband products via an external shape reader
   (`docs/ADDING_A_READER.md`).
 - "Scope and non-goals" section in the README.
+
+### Fixed
+
+- Malformed freq_id selections (`'foo'`, `'506-844-900'`, a bad list element,
+  an `events:` string in the `freq_ids` slot) now fail as actionable
+  `SystemExit`s naming the grammar, instead of `int()` tracebacks. A reversed
+  range (`'844-506'`), which used to parse to an empty set and therefore
+  select *everything*, is now a loud error.
 
 ### Changed
 
