@@ -168,6 +168,68 @@ def plan_runs(self, ctx, spec):
 
 If one product should cover all input units, use the default one-run behavior.
 
+### Per-event fan-out
+
+The fan-out above is per-freq_id -- one product per channel, across all events.
+An event-oriented analysis inverts that: one product per EVENT, consuming every
+selected freq_id of that event (e.g. beamforming an FRB event's baseband into a
+singlebeam and its SNR). Return one sub-selection dict per event; the sources
+understand the `events` key natively:
+
+```python
+def plan_runs(self, ctx, spec):
+    # One product per event. The archive inventory is the event list; its
+    # path is on ctx.options (scan resolves --name/--inventory before runs
+    # are planned). `spec` (--select) stays the freq_id restriction.
+    import json
+    events, seen = [], set()
+    with open(ctx.options["inventory"]) as fh:
+        for line in fh:
+            ev = str(json.loads(line)["event"])
+            if ev not in seen:
+                seen.add(ev); events.append(ev)
+    return [{"events": [ev], "freq_ids": spec} for ev in events]
+```
+
+Each run then enumerates exactly one event's files and writes its own
+resumable product (named `ev<event>[_<freq_ids>].npz` by default). Files of one
+event arrive per-freq_id in inventory order; set `requires_in_order = True` if
+your combine depends on that order rather than accumulating commutatively.
+Against a local directory the same selection works via the filename-parsed
+event (`--source-event-regex`, default `baseband_(\d+)_`).
+
+## Auxiliary inputs (gains, flags, companions)
+
+Some analyses need a small companion file per unit -- calibration gains to
+beamform baseband, a flag table, an ephemeris. The engine will not stage these
+for you, deliberately: a unit is one file, staged alone and deleted after
+reduce, and that invariant is what bounds scratch and keys resume (see "Scope
+and non-goals" in the README). The supported pattern is a side-load, owned by
+the analyzer:
+
+1. **Build the lookup offline.** Survey each companion product into its own
+   inventory (a reader shape per product -- `docs/ADDING_A_READER.md`), then
+   join them to your primary inventory with your matching policy.
+   `examples/match_inventories.py` is a worked starting point that emits a
+   `companions.jsonl` keyed by event.
+2. **Load the lookup once, in `begin()`.** A dict of event -> companion path
+   (pre-staged on /arc) or event -> CADC URI (fetched on demand) is small;
+   hold it in memory.
+3. **Resolve per file, in `consume_file()`.** Every unit's `meta` carries its
+   `event` (archive and local sources both set it), so the lookup key is
+   `meta["event"]`. If you fetch on demand, cache per event -- with per-event
+   fan-out each run touches exactly one event, so that is one fetch per
+   product -- and clean up what you staged; the engine only deletes what IT
+   staged.
+4. **Validate on resume.** A companion that changes the product's meaning
+   (which gain solution was applied) is a resume parameter like any other:
+   stamp its identity into the product and refuse a mismatched resume.
+
+If the companion is not small -- if you need bulk data staged *alongside* every
+unit -- you are fighting the one-file-at-a-time streaming model, and the honest
+answer is a different design (pre-combine the products upstream, or a
+different tool), not a bigger side-load.
+
 ## Loading external analyzers
 
 ```bash

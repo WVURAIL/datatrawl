@@ -1,15 +1,18 @@
 """
 Data source: CADC storage + the CHIME/FRB Datatrail archive.
 
-A source for CANFAR baseband work, in three halves:
+A source for CANFAR archive work, in three halves:
 
   enumerate()  read an inventory (inventory.jsonl) and yield one Unit per file,
-               filtered to the selected freq_ids. The inventory is a cheap,
+               filtered to the selected freq_ids and/or events (see
+               `_selection.py` for the grammar). The inventory is a cheap,
                offline listing, so enumerate itself never touches the network.
 
   survey()     build that inventory.jsonl: walk the Datatrail scope(s), discover
-               every event, and verify each requested freq_id's file at CADC.
-               Resumable + incremental.
+               every event, and verify each file the reader's archive shape
+               (Reader.survey_files) declares for it at CADC -- one HDF5 per
+               freq_id for baseband; whatever a different product's reader
+               declares for that product. Resumable + incremental.
 
   fetch()      stage one file with cadcget via a CADC StorageInventoryClient,
                authenticated by a proxy certificate, with bounded retries.
@@ -36,50 +39,45 @@ from ...interfaces import (DataSource, RunContext, Unit, PluginInfo, READY,
                            SurveyUnavailableError)
 from ...registry import source as _register_source
 from ._datatrail import DATATRAIL, Datatrail
+from ._selection import parse_freq_ids, parse_selection
 
 
 # --------------------------------------------------------------------------
-# baseband file-shape helpers (the per-product naming; see _event_files seam)
+# file naming: the reader owns it (Reader.survey_files); this source only
+# JOINS a common path and a per-row filename into a CADC URI, and falls back
+# to the baseband reader's naming for legacy inventory rows written before
+# rows carried an explicit `name`.
 # --------------------------------------------------------------------------
-def _baseband_filename(event, freq_id) -> str:
-    return f"baseband_{event}_{freq_id}.h5"
+def _join_uri(common_path, name) -> str:
+    return f"{str(common_path).rstrip('/')}/{str(name).lstrip('/')}"
 
 
-def _cadc_uri(common_path, event, freq_id) -> str:
-    return f"{str(common_path).rstrip('/')}/{_baseband_filename(event, freq_id)}"
+def _default_shape():
+    """The reader whose file shape survey uses when the caller supplied none.
+
+    Kept for compatibility with pre-`--reader` invocations (and direct
+    src.survey() calls in tests): the chime-baseband reader IS the naming this
+    source hard-coded historically, so falling back to it changes nothing.
+    Imported lazily so merely importing this module never pulls the reader
+    stack.
+    """
+    from ..readers.chime_baseband import ChimeBasebandReader
+    return ChimeBasebandReader()
+
+
+def _legacy_row_name(event, freq_id) -> str:
+    """Filename for an inventory row that predates the `name` column (always
+    baseband-shaped -- that was the only product then). Delegates to the
+    reader's naming so there is exactly one definition of it."""
+    from ..readers.chime_baseband import baseband_filename
+    return baseband_filename(event, freq_id)
 
 
 def _parse_freq_id_set(sel):
-    """Resolve a freq_id selection into a set of ints, or None for 'all'.
-
-    Accepts whatever an analyzer's plan_runs hands down as ctx.selection:
-      None / 'all' / '*' / ''  -> None  (no filter -- every freq_id)
-      int                      -> {int}
-      list / tuple / set       -> {ints}
-      '844'                    -> {844}
-      '614,706'                -> {614, 706}
-      '506-844'                -> {506, 507, ..., 844}
-    """
-    if sel is None:
-        return None
-    if isinstance(sel, int):
-        return {sel}
-    if isinstance(sel, (list, tuple, set)):
-        return {int(x) for x in sel}
-    s = str(sel).strip().lower()
-    if s in ("", "all", "*"):
-        return None
-    out: set = set()
-    for part in s.split(","):
-        part = part.strip()
-        if not part:
-            continue
-        if "-" in part:
-            lo, hi = part.split("-", 1)
-            out.update(range(int(lo), int(hi) + 1))
-        else:
-            out.add(int(part))
-    return out or None
+    """Legacy alias: the freq_id grammar now lives in `_selection.parse_freq_ids`
+    (shared across sources, alongside the event grammar). Kept so existing
+    imports and the survey's `_resolve_freq_ids` keep working unchanged."""
+    return parse_freq_ids(sel)
 
 
 def _default_cert() -> str:
@@ -320,7 +318,7 @@ class CadcDatatrailSource(DataSource):
             raise SystemExit(
                 f"inventory not found: {path}\n"
                 f"Build one with `datatrawl survey` (or pass --inventory <path>).")
-        wanted = _parse_freq_id_set(ctx.selection)
+        sel = parse_selection(ctx.selection)
         seen, units = set(), []
         with open(path) as fh:
             for line in fh:
@@ -331,21 +329,35 @@ class CadcDatatrailSource(DataSource):
                     r = json.loads(line)
                 except (json.JSONDecodeError, ValueError):
                     continue
-                ch = int(r.get("freq_id", -1))
-                if wanted is not None and ch not in wanted:
+                ch = r.get("freq_id")
+                if not sel.wants_freq_id(ch):
                     continue
-                uri = _cadc_uri(r["common_path"], r["event"], ch)
+                if not sel.wants_event(r.get("event")):
+                    continue
+                # Rows are self-describing since the shape moved onto the
+                # reader: survey writes each file's `name`, and enumerate just
+                # joins it to the common path -- no naming re-derivation, so
+                # survey and read cannot drift. A row WITHOUT `name` predates
+                # that (baseband was the only product) and gets the baseband
+                # reconstruction.
+                name = r.get("name") or _legacy_row_name(r["event"], ch)
+                uri = _join_uri(r["common_path"], name)
                 if uri in seen:
                     continue
                 seen.add(uri)
-                units.append(Unit(
-                    key=uri,
-                    name=_baseband_filename(r["event"], ch),
-                    meta={"freq_id": ch, "event": r["event"],
-                          "quarantine_key": f"{r['event']}:{ch}",
-                          "size_bytes": int(r.get("size_bytes", 0)),
-                          "obs_date": r.get("obs_date", "")},
-                ))
+                # meta: the row, minus the URI ingredients, plus the stable
+                # quarantine identity. Shape-specific columns (freq_id for
+                # baseband; whatever a calibration shape wrote) ride through
+                # untouched -- meta is opaque to the engine and is exactly how
+                # an analyzer keys a companion lookup (e.g. gains by event).
+                meta = {k: v for k, v in r.items()
+                        if k not in ("common_path", "name")}
+                if ch is not None:
+                    meta["freq_id"] = int(ch)
+                meta["size_bytes"] = int(r.get("size_bytes", 0))
+                meta["quarantine_key"] = (f"{r['event']}:{ch}" if ch is not None
+                                          else f"{r['event']}:{name}")
+                units.append(Unit(key=uri, name=name, meta=meta))
         return units
 
     # -- fetch ---------------------------------------------------------------
@@ -368,19 +380,11 @@ class CadcDatatrailSource(DataSource):
         return False, str(last)[:200]
 
     # -- survey ---------------------------------------
-    def _event_files(self, event, common_path, freq_ids):
-        """SEAM: the candidate files one event contributes -> (uri, freq_id).
-
-        This is the only format-specific piece of survey(). Baseband: one HDF5
-        per freq_id, baseband_<event>_<freq_id>.h5. A different data layout
-        (FRB intensity, ...) overrides just this -- everything else (scope walk,
-        ps -> common path, cadcinfo verify, resume, atomic writes) is agnostic.
-        Step 2 of the design moves this onto the reader so survey + read can never
-        drift; for now baseband is the only product, so it lives here.
-        """
-        for ch in freq_ids:
-            yield _cadc_uri(common_path, event, ch), ch
-
+    # (The per-product file shape -- which files one event contributes, and
+    # their names -- used to live here as `_event_files`. Step 2 of the design
+    # moved it onto the reader (Reader.survey_files) so survey and read share
+    # one naming definition and cannot drift; survey() below consults
+    # ctx.reader, falling back to the chime-baseband reader's shape.)
     def _cadc_size(self, uri, retries: int = 3, base: float = 4.0):
         delay, last = base, None
         for k in range(retries + 1):
@@ -421,11 +425,20 @@ class CadcDatatrailSource(DataSource):
         re_enumerate = bool(o.get("re_enumerate", False))
 
         socket.setdefaulttimeout(_SOCKET_TIMEOUT)
+        # The reader owns the archive file shape (which files one event
+        # contributes, and their names -- Reader.survey_files). The CLI resolves
+        # the run's reader onto ctx.reader; a caller that supplied none gets the
+        # chime-baseband shape, which is byte-for-byte what this source used to
+        # hard-code, so pre-existing invocations survey identically.
+        shape = ctx.reader if ctx.reader is not None else _default_shape()
         out = Path(out_dir)
         out.mkdir(parents=True, exist_ok=True)
         inv_path = out / "inventory.jsonl"
-        print(f"[survey] scopes={list(scopes)} freq_ids={len(freq_ids)} "
-              f"({freq_ids[0]}..{freq_ids[-1]}) -> {inv_path}", flush=True)
+        fid_note = (f" freq_ids={len(freq_ids)} ({freq_ids[0]}..{freq_ids[-1]})"
+                    if freq_ids else "")
+        print(f"[survey] scopes={list(scopes)}"
+              f" shape={getattr(shape.info, 'name', type(shape).__name__)}"
+              f"{fid_note} -> {inv_path}", flush=True)
 
         # ---- phase 1: enumerate the unique events (cached) ----
         membership = _enumerate_events(scopes, include_outrigger,
@@ -462,38 +475,41 @@ class CadcDatatrailSource(DataSource):
         def verify(scope, ev):
             cp, ps_ok = DATATRAIL.common_path(scope, ev)
             if not ps_ok:
-                return "service_down", [], []
+                return "service_down", [], [], 0
             if not cp:
-                return "no_data", [], []
+                return "no_data", [], [], 0
             obs_date = (lambda m: f"{m[1]}-{m[2]}-{m[3]}" if m else "unknown")(
                 _DATE_RE.search(cp))
             labels = membership[(scope, ev)]
-            cand = list(self._event_files(ev, cp, freq_ids))
+            # The candidate files one event contributes -- (name, fields) pairs
+            # from the reader's shape. Baseband yields one per freq_id; a
+            # per-event product may yield a single file with its own fields.
+            cand = list(shape.survey_files(ev, cp, freq_ids, ctx))
 
             def probe(item):
-                uri, ch = item
-                size, err = self._cadc_size(uri)
-                return ch, size, err
+                name, fields = item
+                size, err = self._cadc_size(_join_uri(cp, name))
+                return name, fields, size, err
 
-            inst = ctx.instrument
-            bytes_per_frame = (inst.nfft * inst.n_feeds) if inst is not None else 0
             records, errored = [], []
-            for ch, size, err in pool.map(probe, cand):
+            for name, fields, size, err in pool.map(probe, cand):
                 if err is not None:
-                    errored.append(ch)
+                    errored.append(name)
                 elif size is not None and size >= _MIN_VALID_BYTES:
+                    # Self-describing row: `name` is what enumerate/fetch will
+                    # stage (joined to common_path), and the shape's per-file
+                    # fields land verbatim as columns.
                     rec = {
-                        "scope": scope, "event": ev, "freq_id": ch,
+                        "scope": scope, "event": ev, "name": name,
                         "size_bytes": size,
                         "common_path": cp, "obs_date": obs_date, "datasets": labels,
                     }
-                    if inst is not None:   # optional geometry annotation, from the YAML
-                        rec["freq_mhz"] = round(inst.freq_of_freq_id(ch), 4)
-                        rec["n_frames"] = round(size / bytes_per_frame, 4)
+                    rec.update(fields or {})
+                    shape.annotate_row(rec, ctx.instrument)
                     records.append(rec)
             if errored and len(errored) == len(cand):       # all errored -> outage
-                return "service_down", records, errored
-            return "progress", records, errored
+                return "service_down", records, errored, len(cand)
+            return "progress", records, errored, len(cand)
 
         try:
             for i, (scope, ev) in enumerate(events, 1):
@@ -509,7 +525,7 @@ class CadcDatatrailSource(DataSource):
                 # one aborts (the signature of an expired cert, which won't heal).
                 backoff, waited = 60, 0
                 while True:
-                    status, records, errored = verify(scope, ev)
+                    status, records, errored, n_cand = verify(scope, ev)
                     if status != "service_down":
                         break
                     if waited >= _MAX_SERVICE_WAIT:
@@ -540,7 +556,7 @@ class CadcDatatrailSource(DataSource):
                 # forever.
                 empty = not records and not errored
                 write_recs, done, incomplete, _ = _commit_decision(
-                    len(errored), len(freq_ids), attempts.get(key, 0),
+                    len(errored), n_cand, attempts.get(key, 0),
                     n_records=len(records))
                 if write_recs:
                     for rec in records:
@@ -575,7 +591,7 @@ class CadcDatatrailSource(DataSource):
                                else f" ({len(errored)} unresolved, retry)"
                                if errored else "")
                     print(f"[{i}/{len(events)}] {ev}: "
-                          f"{len(records)}/{len(freq_ids)} files{tag}", flush=True)
+                          f"{len(records)}/{n_cand} files{tag}", flush=True)
         finally:
             attempts_path.write_text(json.dumps(attempts))
             pool.shutdown(wait=False)

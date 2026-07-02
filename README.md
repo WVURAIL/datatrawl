@@ -57,6 +57,36 @@ Plus two Datatrail terms a survey works against:
 A survey turns scopes and datasets into a local **inventory**: a JSONL list of
 verified units to scan.
 
+## Scope and non-goals
+
+Knowing what datatrawl deliberately does NOT do is as useful as knowing what it
+does, so the boundary is stated here rather than discovered mid-design:
+
+* **A unit is one file.** The engine stages one file, streams it through the
+  reader into the analyzer, deletes it, checkpoints, and moves on. That
+  invariant is what bounds scratch usage and makes every run resumable, so
+  there is no mode that stages a *group* of files together.
+* **datatrawl never joins data products.** It will build you a verified
+  inventory per product type (survey with the right reader shape -- see
+  [`docs/ADDING_A_READER.md`](docs/ADDING_A_READER.md)), but *which* companion
+  file corresponds to a unit (the nearest gain solution, the covering
+  calibration interval, a staleness cap) is science policy, not archive
+  mechanics. That matching is your code, over the inventories --
+  [`examples/match_inventories.py`](examples/match_inventories.py) is a
+  worked starting point.
+* **Auxiliary inputs are the analyzer's job.** An analyzer that needs a
+  per-event companion (gains, flags) side-loads it itself, keyed off the
+  unit's metadata -- the pattern is in
+  [`docs/ADDING_AN_ANALYZER.md`](docs/ADDING_AN_ANALYZER.md#auxiliary-inputs-gains-flags-companions).
+* **Selection is freq_ids and/or events, exactly.** `--select 614,706`,
+  `--select 506-844`, `--select events:349382977`, or the dict form a
+  `plan_runs` returns (`{"events": [...], "freq_ids": ...}`). Filters are
+  ANDed and exact; nothing is inferred from the shape of a bare integer.
+
+If your workflow fits "stream verified files one at a time into a resumable
+product", datatrawl carries the archive mechanics for you. If it needs paired
+bulk staging, that is a different engine, not a missing flag.
+
 ## What Datatrail does
 
 Use Datatrail directly for archive discovery:

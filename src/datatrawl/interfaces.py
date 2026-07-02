@@ -15,7 +15,10 @@ engine:
                (the reference one is CADC + the CHIME/FRB Datatrail archive)
 
   Reader       WHAT a staged file looks like: turn a path into an iterable of
-               arrays plus the per-unit metadata the analyzer needs.
+               arrays plus the per-unit metadata the analyzer needs. The reader
+               also owns the ARCHIVE FILE SHAPE -- which files one event
+               contributes and what they are named (survey_files) -- so an
+               archive survey and a later read share one naming definition.
                (the reference one is CHIME 4+4-bit baseband HDF5)
 
   Analyzer      the SCIENCE: consume those arrays in a single streaming pass and
@@ -96,8 +99,15 @@ class Unit:
 class RunContext:
     """Shared, read-only-ish context threaded to reader + analyzer for a run."""
     instrument: Any                      # datatrawl.instruments.Instrument
-    selection: Any = None                # what the user asked to process (freq_ids, scope, ...)
+    selection: Any = None                # what the user asked to process (freq_ids,
+                                         # events, scope, ...) -- sources parse it
+                                         # via plugins/sources/_selection.py
     options: Mapping[str, Any] = field(default_factory=dict)
+    reader: Any = None                   # the run's Reader instance, when the caller
+                                         # has resolved one. survey() consults it for
+                                         # the archive file shape (Reader.survey_files)
+                                         # so survey and read share one definition of
+                                         # what a unit's file is named.
 
 
 # --------------------------------------------------------------------------
@@ -168,6 +178,42 @@ class Reader:
 
     def iter_arrays(self, path: str, ctx: RunContext) -> Iterator:
         raise NotImplementedError
+
+    # -- archive file shape (optional) ------------------------------------
+    # An archive survey needs to know, for one event, WHICH files this
+    # reader's product contributes and what they are called. That is format
+    # knowledge, so it lives on the reader -- the same class that will later
+    # open those files -- and survey + read can never drift apart on naming.
+    # (This used to be hard-coded as the baseband shape inside the CADC
+    # source; a reader that only ever scans pre-listed local files can leave
+    # both methods untouched.)
+    def survey_files(self, event, common_path, selection,
+                     ctx: RunContext) -> Iterable[tuple]:
+        """Yield (filename, fields) for every candidate file of one event.
+
+        `filename` is relative to the event's archive common path (it may
+        contain a sub-path). `fields` is a mapping of per-file inventory
+        columns this format defines -- e.g. the baseband reader yields
+        ({"freq_id": ch}) per channel; a per-event calibration product might
+        yield a single file with no fields at all. `selection` is whatever
+        per-survey spec the source resolved (the baseband survey passes the
+        freq_id list); a shape that is not selected that way ignores it.
+        Everything yielded here lands verbatim in the inventory row, and the
+        row's `name` is what enumerate/fetch later stage -- no re-derivation.
+        """
+        raise NotImplementedError(
+            f"reader {getattr(self.info, 'name', type(self).__name__)!r} does "
+            f"not declare an archive file shape (survey_files); an archive "
+            f"survey needs a reader that does. See docs/ADDING_A_READER.md.")
+
+    def annotate_row(self, row: dict, instrument) -> None:
+        """Optionally enrich one verified inventory row in place.
+
+        Called by survey after the file's size is known, with the run's
+        instrument (which may be None). The baseband reader adds freq_mhz and
+        n_frames here; the default adds nothing.
+        """
+        return None
 
     def preflight(self, ctx: RunContext) -> tuple[bool, list[str]]:
         return True, []

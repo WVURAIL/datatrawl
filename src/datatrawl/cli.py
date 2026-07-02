@@ -390,6 +390,7 @@ def _collect_options(args) -> dict:
         "source_root": getattr(args, "source_root", None),
         "source_glob": getattr(args, "source_glob", None) or "*.h5",
         "source_freq_id_regex": getattr(args, "source_freq_id_regex", None),
+        "source_event_regex": getattr(args, "source_event_regex", None),
         "gpu": getattr(args, "gpu", False),
         "max_events": getattr(args, "max_events", None),
         # survey-only knobs (absent on other subcommands -> harmless None/False)
@@ -550,6 +551,16 @@ def _resolve_from_meta(args) -> None:
 def cmd_survey(args) -> int:
     instrument, ctx = _make_ctx(args)
     src = _require_plugin("source", args.source)()
+    # The reader owns the archive file shape (Reader.survey_files) -- which
+    # files one event contributes and what they are named -- so survey resolves
+    # the reader and threads it to the source on ctx.reader. --reader overrides;
+    # the telescope's canonical reader is the default (the same resolution
+    # `scan` records in the meta sidecar). Recon (--scopes-only) lists names
+    # only and needs no shape. An external shape reader loads with --plugin.
+    reader_name = (getattr(args, "reader", None)
+                   or getattr(instrument, "reader", "") or None)
+    if reader_name and not getattr(args, "scopes_only", False):
+        ctx.reader = _require_plugin("reader", reader_name)()
     if getattr(args, "scopes_only", False) and not args.out:
         # the recon scope map spans telescopes (it lists every datatrail scope),
         # so it is not telescope-specific -> data/scopes.jsonl, a level above the
@@ -587,7 +598,8 @@ def cmd_survey(args) -> int:
     if not getattr(args, "scopes_only", False):
         meta_path = write_inventory_meta(
             path, instrument, args.source, getattr(args, "freq_ids", None),
-            name=name, scope_request=getattr(args, "scope", None))
+            name=name, scope_request=getattr(args, "scope", None),
+            reader=reader_name)
         print(f"  meta: {meta_path}")
     return 0
 
@@ -704,6 +716,7 @@ def cmd_explore(args) -> int:
         "source_root": getattr(args, "source_root", None),
         "source_glob": getattr(args, "source_glob", None) or "*.h5",
         "source_freq_id_regex": getattr(args, "source_freq_id_regex", None),
+        "source_event_regex": getattr(args, "source_event_regex", None),
     }
     opts.update(_parse_set_options(getattr(args, "set_opts", None)))
     ctx = RunContext(instrument=instrument, selection=None, options=opts)
@@ -809,6 +822,7 @@ def cmd_scan(args) -> int:
         instrument.nfft = int(args.nfft)
     src = _require_plugin("source", args.source)()
     rdr = _require_plugin("reader", args.reader)()
+    ctx.reader = rdr
     red_cls = _require_plugin("analyzer", args.analyzer)
 
     # The analysis splits --select into independent runs (one product each).
@@ -894,7 +908,20 @@ def _default_product_path(args, instrument, selection) -> str:
     # Namespaced by analyzer so two analyses never collide on the same
     # <freq_id>.npz (e.g. spectrum's products live under results/<tel>/spectrum/).
     base = os.path.join(args.root, "results", instrument.name, args.analyzer)
-    if isinstance(selection, (list, tuple)):
+    if isinstance(selection, dict):
+        # the structured form a per-event plan_runs returns, e.g.
+        # {"events": ["349382977"], "freq_ids": "506-844"} -> ev349382977_506-844
+        parts = []
+        ev = selection.get("events")
+        if ev:
+            ev = [ev] if isinstance(ev, (int, str)) else list(ev)
+            parts.append("ev" + "-".join(str(e) for e in ev))
+        fid = selection.get("freq_ids")
+        if fid not in (None, "", "all", "*"):
+            fid = [fid] if isinstance(fid, (int, str)) else list(fid)
+            parts.append("_".join(str(f).replace(",", "_") for f in fid))
+        stem = re.sub(r"[^A-Za-z0-9._-]+", "_", "_".join(parts)) or "all"
+    elif isinstance(selection, (list, tuple)):
         stem = "_".join(str(s) for s in selection) if selection else "all"
     elif selection is None:
         stem = "all"
@@ -1016,6 +1043,12 @@ def build_parser() -> argparse.ArgumentParser:
     p_survey.add_argument("--name", default=None,
                           help="name this inventory -> data/<name>/ "
                                "(default: derived from telescope + freq_ids)")
+    p_survey.add_argument("--reader", default=None,
+                          help="reader whose archive file shape drives the survey "
+                               "(which files one event contributes; see "
+                               "Reader.survey_files). Default: the telescope's "
+                               "canonical reader. Load an external one with "
+                               "--plugin.")
     p_survey.add_argument("--scope", default=None,
                           help="Datatrail scope(s) to walk, comma-separated. Defaults "
                                "to the telescope's declared scopes (chime: the two "
@@ -1073,6 +1106,9 @@ def build_parser() -> argparse.ArgumentParser:
     p_expl.add_argument("--source-freq-id-regex", default=None,
                         help="local source: regex with one group capturing the "
                              "freq_id int from a filename")
+    p_expl.add_argument("--source-event-regex", default=None,
+                        help="local source: regex with one group capturing the "
+                             "event id from a filename")
     p_expl.add_argument(
         "--set", dest="set_opts", action="append", metavar="KEY=VALUE",
         help="source-specific parameter passed via ctx.options (repeatable)")
@@ -1097,8 +1133,10 @@ def build_parser() -> argparse.ArgumentParser:
                              "(see `datatrawl list analyzers`)")
     p_scan.add_argument("--select", default=None,
                         help="selection passed to the analyzer, e.g. a single "
-                             "freq_id '844', a list '614,706', or a range "
-                             "'506-552' (spectrum needs explicit freq_ids)")
+                             "freq_id '844', a list '614,706', a range "
+                             "'506-552' (spectrum needs explicit freq_ids), or "
+                             "events with 'events:349382977[,...]' for an "
+                             "event-oriented analyzer")
     p_scan.add_argument("--root", default=os.getcwd(),
                         help="working root containing data/ and results/ "
                              "(default: current directory)")
@@ -1115,6 +1153,10 @@ def build_parser() -> argparse.ArgumentParser:
     p_scan.add_argument("--source-freq-id-regex", default=None,
                         help="local source: regex with one group capturing the "
                              "freq_id int from a filename (default _(\\d+)\\.h5$)")
+    p_scan.add_argument("--source-event-regex", default=None,
+                        help="local source: regex with one group capturing the "
+                             "event id from a filename "
+                             "(default baseband_(\\d+)_)")
     p_scan.add_argument("--nfft", type=positive_int, default=None,
                         help="override the analysis frame/FFT length for this run "
                              "(default: the instrument YAML's nfft)")
