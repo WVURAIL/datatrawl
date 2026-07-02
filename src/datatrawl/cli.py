@@ -5,12 +5,12 @@ Discovery (answer "how do I even start?"):
   datatrawl list                 everything available, at a glance
   datatrawl list telescopes      telescopes (ready vs. stub)
   datatrawl list readers         file-format readers
-  datatrawl list analyzers        analyses
+  datatrawl list analyzers       science plugins
   datatrawl list sources         where data comes from
   datatrawl doctor               the startup checklist + ready-to-go combos
-  datatrawl doctor --telescope chime --source cadc-datatrail \
-                       --reader chime-baseband --analyzer spectrum
-                                     checklist for ONE chosen combination
+  datatrawl doctor --telescope chime --source cadc-datatrail \\
+                   --reader chime-baseband --analyzer spectrum
+                                 checklist for ONE chosen combination
 
 Run:
   datatrawl explore --telescope chime --source cadc-datatrail
@@ -982,12 +982,20 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_doctor = sub.add_parser("doctor", parents=[common],
                               help="startup checklist for a chosen combination")
-    p_doctor.add_argument("--telescope")
-    p_doctor.add_argument("--source")
-    p_doctor.add_argument("--reader")
-    p_doctor.add_argument("--analyzer")
-    p_doctor.add_argument("--gpu", action="store_true")
-    p_doctor.add_argument("--source-root", default=None)
+    p_doctor.add_argument("--telescope",
+                          help="telescope to check (see `datatrawl list telescopes`)")
+    p_doctor.add_argument("--source",
+                          help="source plugin to check")
+    p_doctor.add_argument("--reader",
+                          help="reader plugin to check")
+    p_doctor.add_argument("--analyzer",
+                          help="analyzer plugin to check")
+    p_doctor.add_argument("--gpu", action="store_true",
+                          help="also check the GPU prerequisite (cupy) that "
+                               "`scan --gpu` needs")
+    p_doctor.add_argument("--source-root", default=None,
+                          help="local source: input directory, so the source's "
+                               "preflight can check it")
     p_doctor.add_argument(
         "--set", dest="set_opts", action="append", metavar="KEY=VALUE",
         help="plugin-specific parameter passed via ctx.options (repeatable)")
@@ -995,11 +1003,16 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_survey = sub.add_parser("survey", parents=[common],
                               help="walk the archive to build an inventory for a source")
-    p_survey.add_argument("--telescope", required=True)
+    p_survey.add_argument("--telescope", required=True,
+                          help="telescope whose scopes to survey (e.g. chime)")
     p_survey.add_argument("--source", default="cadc-datatrail",
                           help="source plugin to use (default: cadc-datatrail)")
-    p_survey.add_argument("--root", default=os.getcwd())
-    p_survey.add_argument("--out", default=None)
+    p_survey.add_argument("--root", default=os.getcwd(),
+                          help="working root; the inventory lands under "
+                               "<root>/data/ (default: current directory)")
+    p_survey.add_argument("--out", default=None,
+                          help="explicit inventory output directory "
+                               "(overrides <root>/data/<name>/)")
     p_survey.add_argument("--name", default=None,
                           help="name this inventory -> data/<name>/ "
                                "(default: derived from telescope + freq_ids)")
@@ -1034,7 +1047,9 @@ def build_parser() -> argparse.ArgumentParser:
                           help="source-specific parameter passed via ctx.options "
                                "(repeatable), for a custom source's survey(), e.g. "
                                "--set source_root=/data")
-    p_survey.add_argument("--dry-run", action="store_true")
+    p_survey.add_argument("--dry-run", action="store_true",
+                          help="print the survey target and exit without "
+                               "contacting the archive")
     p_survey.set_defaults(func=cmd_survey)
 
     p_expl = sub.add_parser(
@@ -1045,21 +1060,25 @@ def build_parser() -> argparse.ArgumentParser:
                              "given (read from the inventory meta, like `scan`)")
     p_expl.add_argument("--telescope", default=None,
                         help="needed for an archive source (locates its inventory)")
-    p_expl.add_argument("--inventory", default=None)
+    p_expl.add_argument("--inventory", default=None,
+                        help="explicit inventory.jsonl path (alternative to --name)")
     p_expl.add_argument("--name", default=None,
                         help="inventory dir label under data/ set by survey; "
                              "alternative to --inventory (telescope/source/reader "
                              "are read from its meta sidecar)")
     p_expl.add_argument("--source-root", default=None,
                         help="local source: directory to inspect")
-    p_expl.add_argument("--source-glob", default="*.h5")
+    p_expl.add_argument("--source-glob", default="*.h5",
+                        help="local source: file glob (default *.h5)")
     p_expl.add_argument("--source-freq-id-regex", default=None,
                         help="local source: regex with one group capturing the "
                              "freq_id int from a filename")
     p_expl.add_argument(
         "--set", dest="set_opts", action="append", metavar="KEY=VALUE",
         help="source-specific parameter passed via ctx.options (repeatable)")
-    p_expl.add_argument("--root", default=os.getcwd())
+    p_expl.add_argument("--root", default=os.getcwd(),
+                        help="working root containing data/ "
+                             "(default: current directory)")
     p_expl.set_defaults(func=cmd_explore)
 
     p_scan = sub.add_parser("scan", parents=[common],
@@ -1073,14 +1092,21 @@ def build_parser() -> argparse.ArgumentParser:
     p_scan.add_argument("--reader", default=None,
                         help="file-format reader; defaults to the telescope's "
                              "canonical reader recorded in the inventory meta")
-    p_scan.add_argument("--analyzer", required=True)
+    p_scan.add_argument("--analyzer", required=True,
+                        help="analyzer plugin to run "
+                             "(see `datatrawl list analyzers`)")
     p_scan.add_argument("--select", default=None,
                         help="selection passed to the analyzer, e.g. a single "
                              "freq_id '844', a list '614,706', or a range "
                              "'506-552' (spectrum needs explicit freq_ids)")
-    p_scan.add_argument("--root", default=os.getcwd())
+    p_scan.add_argument("--root", default=os.getcwd(),
+                        help="working root containing data/ and results/ "
+                             "(default: current directory)")
     p_scan.add_argument("--out", default=None, help="product path (default results/<tel>/<analyzer>/<sel>.npz)")
-    p_scan.add_argument("--inventory", default=None)
+    p_scan.add_argument("--inventory", default=None,
+                        help="explicit inventory.jsonl path (alternative to "
+                             "--name); its meta sidecar backfills "
+                             "telescope/source/reader")
     p_scan.add_argument("--name", default=None,
                         help="named inventory under data/<name>/ as written by "
                              "survey; alternative to --inventory")
@@ -1096,7 +1122,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--tmp-dir", default=None,
         help="scratch directory for staged files. Default: a unique directory "
              "under DATATRAWL_TMPDIR, writable /scratch, or the OS temp directory")
-    p_scan.add_argument("--checkpoint-every", type=positive_int, default=50)
+    p_scan.add_argument("--checkpoint-every", type=positive_int, default=50,
+                        help="write the product checkpoint every N files "
+                             "(default 50); resume restarts from the last "
+                             "checkpoint, so lower = less redo after a kill, "
+                             "more I/O")
     p_scan.add_argument("--download-workers", type=positive_int, default=1,
                         help="parallel download threads (default 1; >1 overlaps "
                              "downloads but delivers files in completion order, so "
@@ -1105,7 +1135,10 @@ def build_parser() -> argparse.ArgumentParser:
                         help="max files kept on scratch at once (default 1 = the "
                              "storage-safe one-file guarantee; raise to trade disk "
                              "for download/analyze overlap, bound = N x largest file)")
-    p_scan.add_argument("--max-files", type=positive_int, default=None)
+    p_scan.add_argument("--max-files", type=positive_int, default=None,
+                        help="process only the first N units of the selection "
+                             "(bounded smoke test; keep its product separate "
+                             "from an uncapped run)")
     p_scan.add_argument("--max-frames-per-file", type=positive_int, default=None,
                         help="analyze only the first N frames (FFT windows) of each "
                              "file -- caps per-file work for a fast spot-check "
@@ -1123,7 +1156,9 @@ def build_parser() -> argparse.ArgumentParser:
     p_scan.add_argument("--set", dest="set_opts", action="append", metavar="KEY=VALUE",
                         help="plugin-specific parameter passed via ctx.options "
                              "(repeatable), e.g. --set bracket_hz=400")
-    p_scan.add_argument("--dry-run", action="store_true")
+    p_scan.add_argument("--dry-run", action="store_true",
+                        help="list what would be processed, then exit without "
+                             "staging or analyzing anything")
     p_scan.set_defaults(func=cmd_scan)
 
     p_setup_cupy = sub.add_parser(

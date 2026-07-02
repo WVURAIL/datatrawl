@@ -30,9 +30,7 @@ datatrawl doctor
 ```
 
 With a concrete pipeline it checks the requested telescope, source, reader,
-and analysis plugin. Current branches may call the analysis plugin either an
-`analyzer` or a `reducer`; the output guide uses "analysis plugin" when the
-distinction is not important.
+and analyzer:
 
 ```bash
 datatrawl doctor \
@@ -55,18 +53,21 @@ are sound, but Datatrail or another external service could not be validated at
 that moment. Do not start a new archive survey until the skipped archive checks
 can run.
 
-## `datatrawl survey` / `datatrawl crawl`
+## `datatrawl survey`
 
-A survey or crawl builds or refreshes a small inventory; it does not bulk-download
+A survey builds or refreshes a small inventory; it does not bulk-download
 archive data. Typical lines are:
 
 ```text
-[survey] start: telescope=chime source=cadc-datatrail out=data/chime-spectrum-844
-[cadc-datatrail] survey: scopes=['chime.event.baseband.raw'] freq_ids=1 (844..844) -> data/chime-spectrum-844/inventory.jsonl
+[survey] chime via cadc-datatrail -> data/chime-spectrum-844
+[survey] scopes=['chime.event.baseband.raw'] freq_ids=1 (844..844) -> data/chime-spectrum-844/inventory.jsonl
+to survey: 80 events
 resume: 12 events already done
 [15/80] <event>: 1/1 files
 survey: 5 events this run -- 5 rows written, 0 no-data, 0 accepted-empty, 0 resolved-but-empty (retry next run), 0 incomplete
 survey wrote data/chime-spectrum-844/inventory.jsonl
+  inventory: data/chime-spectrum-844/inventory.jsonl
+  meta: data/chime-spectrum-844/inventory.meta.json
 ```
 
 Important terms:
@@ -76,7 +77,7 @@ Important terms:
 | `rows written` | Files verified and added to `inventory.jsonl` during this run. |
 | `no-data` | Datatrail did not report a usable common path for the event. |
 | `accepted-empty` | The event resolved, but no requested files were retrievable after repeated checks. |
-| `resolved-but-empty` | The event resolved to no retrievable files in this run and will be retried on the next survey/crawl. |
+| `resolved-but-empty` | The event resolved to no retrievable files in this run and will be retried on the next survey. |
 | `incomplete` | Some requested files could not be verified after the retry limit. Verified files are still kept. |
 
 If `inventory.jsonl is EMPTY`, the inventory step found no scan units. Check one
@@ -125,4 +126,4 @@ checkpoint and skip the quarantined file.
 
 - [`TROUBLESHOOTING.md`](TROUBLESHOOTING.md) for recovery recipes.
 - [`DATATRAIL_BOUNDARY.md`](DATATRAIL_BOUNDARY.md) for Datatrail versus
-  `datatrawl` responsibilities, when present in this branch.
+  `datatrawl` responsibilities.
