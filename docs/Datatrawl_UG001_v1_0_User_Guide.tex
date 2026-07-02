@@ -1,0 +1,282 @@
+\documentclass[10pt,letterpaper]{article}
+
+\usepackage[letterpaper,margin=0.70in,headheight=22pt,headsep=16pt,footskip=24pt]{geometry}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{lmodern}
+\usepackage{microtype}
+\usepackage{xcolor}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{tabularx}
+\usepackage{longtable}
+\usepackage{amsmath,amssymb}
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta,positioning,calc,shapes.geometric,decorations.pathreplacing,fit}
+\usepackage{enumitem}
+\usepackage{fancyhdr}
+\usepackage{titlesec}
+\usepackage{caption}
+\usepackage{listings}
+\usepackage{xurl}
+\usepackage[hidelinks]{hyperref}
+\usepackage{lastpage}
+\usepackage{float}
+\usepackage{placeins}
+
+\definecolor{TrawlAmber}{HTML}{A66A00}
+\definecolor{TrawlGray}{HTML}{555555}
+\definecolor{TrawlBlue}{HTML}{144E8C}
+\definecolor{LightGray}{HTML}{F3F3F3}
+\definecolor{MidGray}{HTML}{D9D9D9}
+\definecolor{DarkText}{HTML}{1A1A1A}
+\definecolor{GoodGreen}{HTML}{2B7A2B}
+\definecolor{WarnOrange}{HTML}{A65E00}
+
+\renewcommand{\familydefault}{\sfdefault}
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{5pt}
+\renewcommand{\arraystretch}{1.15}
+\sloppy
+\setlist[itemize]{leftmargin=1.2em,itemsep=2pt,topsep=2pt}
+\setlist[enumerate]{leftmargin=1.4em,itemsep=2pt,topsep=2pt}
+
+\titleformat{\section}{\Large\bfseries\color{DarkText}}{}{0pt}{}[\vspace{-3pt}\color{TrawlAmber}\titlerule]
+\titleformat{\subsection}{\large\bfseries\color{DarkText}}{}{0pt}{}
+\titleformat{\subsubsection}{\normalsize\bfseries\color{DarkText}}{}{0pt}{}
+
+\newcommand{\code}[1]{\texttt{\detokenize{#1}}}
+\newcolumntype{Y}{>{\raggedright\arraybackslash}X}
+\newcolumntype{L}[1]{>{\raggedright\arraybackslash}p{#1}}
+\captionsetup{font=small,labelfont=bf}
+
+\lstdefinestyle{shell}{
+  basicstyle=\ttfamily\footnotesize,
+  breaklines=true,
+  columns=fullflexible,
+  frame=single,
+  rulecolor=\color{MidGray},
+  backgroundcolor=\color{LightGray},
+  keepspaces=true,
+  showstringspaces=false
+}
+\lstset{style=shell}
+
+\newcommand{\notebox}[1]{%
+  \vspace{4pt}\noindent\fcolorbox{TrawlBlue}{LightGray}{%
+  \begin{minipage}{0.965\linewidth}%
+  \textbf{Note:} #1%
+  \end{minipage}}\vspace{4pt}}
+
+\newcommand{\importantbox}[1]{%
+  \vspace{4pt}\noindent\fcolorbox{TrawlAmber}{LightGray}{%
+  \begin{minipage}{0.965\linewidth}%
+  \textbf{Important:} #1%
+  \end{minipage}}\vspace{4pt}}
+
+\newcommand{\field}[1]{\texttt{\detokenize{#1}}}
+
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[L]{\small Datatrawl-UG001}
+\fancyhead[C]{\small Storage-Safe Archive Trawling Engine v0.1.0}
+\fancyhead[R]{\small User Guide}
+\fancyfoot[L]{\small Datatrawl-UG001 v1.0}
+\fancyfoot[C]{\small West Virginia University}
+\fancyfoot[R]{\small Page \thepage\ of \pageref{LastPage}}
+\renewcommand{\headrulewidth}{0.8pt}
+\renewcommand{\headrule}{\hbox to\headwidth{\color{TrawlAmber}\leaders\hrule height \headrulewidth\hfill}}
+\renewcommand{\footrulewidth}{0.8pt}
+\renewcommand{\footrule}{\hbox to\headwidth{\color{TrawlAmber}\leaders\hrule height \footrulewidth\hfill}}
+
+\title{datatrawl Storage-Safe Archive Trawling Engine v0.1.0\\User Guide}
+\author{West Virginia University}
+\date{Datatrawl-UG001 v1.0 \\ July 1, 2026}
+
+\begin{document}
+\thispagestyle{fancy}
+{\sffamily
+\begin{minipage}[t]{0.39\textwidth}
+  {\fontsize{24}{26}\selectfont\bfseries\color{TrawlAmber}datatrawl}\par
+  {\small Datatrawl-UG001 v1.0, July 1, 2026}
+\end{minipage}%
+\begin{minipage}[t]{0.61\textwidth}
+  \raggedleft
+  {\large\bfseries User Guide}\par
+  {\small Install, plan, run, resume.}\par
+  {\small West Virginia University Radio Astronomy Instrumentation Lab (RAIL)}
+\end{minipage}
+}
+\vspace{6pt}
+{\color{TrawlAmber}\hrule height 1.2pt}
+\vspace{8pt}
+
+\section{The Model in One Paragraph}
+Every datatrawl run is four choices: a \textbf{telescope} (geometry and
+metadata), a \textbf{source} (where files come from), a \textbf{reader} (how
+one file becomes arrays), and an \textbf{analyzer} (the science). The engine
+then streams the archive one file at a time --- fetch, analyze, delete,
+checkpoint --- into a single resumable product per run. \code{datatrawl
+doctor} exists to make the four choices and their prerequisites legible
+\emph{before} you spend hours on a scan.
+
+\section{Installation}
+\begin{lstlisting}
+git clone https://github.com/WVURAIL/datatrawl.git
+cd datatrawl
+python -m venv .venv && source .venv/bin/activate
+pip install -e ".[dev]"
+datatrawl --version
+pytest -q
+\end{lstlisting}
+Optional extras: \code{[cadc]} for CADC fetch, \code{[survey]} for Datatrail
+inventory builds, \code{[gpu]} for GPU analyzers (CuPy is installed separately
+--- see \S\ref{sec:cupy}).
+
+\section{Discovering What Is Available}
+\begin{lstlisting}
+datatrawl list                 # everything at a glance
+datatrawl list telescopes      # ready vs. stub
+datatrawl list readers
+datatrawl list analyzers
+datatrawl list sources
+\end{lstlisting}
+Then verify one concrete combination end to end:
+\begin{lstlisting}
+datatrawl doctor --telescope chime --source cadc-datatrail \
+                 --reader chime-baseband --analyzer spectrum
+\end{lstlisting}
+\code{doctor} reports, per choice, what is installed, what is configured, what
+credentials are missing, and whether the combination is ready to run.
+
+\section{Building an Inventory}
+\code{survey} walks the archive once and writes a named inventory directory
+(default \code{data/<telescope>-fid<freq_ids>/}, or \code{--name}); it records
+the telescope, source, and reader choices inside the inventory so later scans
+need only the analyzer:
+\begin{lstlisting}
+datatrawl explore --telescope chime --source cadc-datatrail   # look, no download
+datatrawl survey  --telescope chime --source cadc-datatrail   # -> data/chime.../
+\end{lstlisting}
+Inventories stream from disk during a scan; the engine never needs the whole
+archive listing in memory.
+
+\section{Running a Scan}
+\begin{lstlisting}
+datatrawl scan --name chime --analyzer spectrum --select 614,706
+\end{lstlisting}
+\begin{itemize}
+  \item \code{--select} is interpreted by the analyzer (for the spectrum
+        analyzer: explicit \field{freq_id}s such as \code{844},
+        \code{614,706}, or ranges like \code{506-552}); a multi-item selection
+        becomes independent products that resume and fail independently.
+  \item \code{--checkpoint-every N} (default 50) sets how many files may need
+        re-processing after a kill; each checkpoint is an atomic full-product
+        save.
+  \item \code{--download-workers} / \code{--max-staged-files} parallelize
+        \emph{fetch only}; the engine refuses values above 1 for analyzers
+        that declare \field{requires_in_order}.
+  \item \code{--plugin yourpkg.module} loads an external plugin explicitly;
+        installed packages advertising the \code{datatrawl.plugins}
+        entry-point group are found automatically.
+\end{itemize}
+
+\importantbox{Storage safety is the point: at the defaults, at most one staged
+file exists at a time, it lives in a per-invocation staging directory
+(concurrent scans cannot delete each other's files), and it is deleted as soon
+as the analyzer has consumed it. Do not point the staging area at precious
+data.}
+
+\section{Kill and Resume}
+A scan may be killed at any instant --- session timeout, preemption,
+\code{Ctrl-C}. On restart with the same configuration and output, the analyzer
+re-loads its product, skips every unit already accumulated, and continues. The
+guarantee: at most the files consumed since the last checkpoint are re-done,
+and the product is never left partially written (saves go to \code{.tmp}, then
+rename). A resume against an \emph{incompatible} existing product is refused
+with an explicit error rather than silently mixing two configurations; use a
+clean output location to rebuild.
+
+\section{CANFAR / CADC Notes}
+On a CANFAR session: install with the \code{[cadc]} (and, for inventory
+builds, \code{[survey]}) extras, ensure a valid CADC proxy certificate, and
+let \code{datatrawl doctor --source cadc-datatrail ...} confirm credentials
+and the Datatrail contract before launching. Datatrail remains the archive
+authority --- datatrawl only reads; the boundary is specified in
+\code{docs/DATATRAIL_BOUNDARY.md}. For long scans, size
+\code{--checkpoint-every} so an unexpected session end costs minutes, not
+hours.
+
+\section{GPU Sessions and CuPy}\label{sec:cupy}
+GPU analyzers use CuPy, which must match the session image's CUDA runtime, so
+it is not pinned as a dependency. On a GPU node:
+\begin{lstlisting}
+datatrawl setup-cupy            # report the image's CUDA + the matching wheel
+datatrawl setup-cupy --install  # install cupy-cudaXXx into the active venv
+\end{lstlisting}
+CPU-only environments need nothing; the built-in analyzers fall back to
+NumPy with identical arithmetic.
+
+\section{Writing an Analyzer}
+The analyzer owns its product file. Implement the lifecycle and register it:
+\begin{lstlisting}
+class MyAnalyzer(Analyzer):
+    info = PluginInfo(name="my-analyzer", ...)
+    requires_in_order = False   # True for any order-dependent product
+
+    def resume(self, path, ctx):      # load existing product; raise if
+        ...                           # present-but-incompatible
+    def processed_keys(self):         # unit keys already in the product
+    def begin(self, ctx, first_meta): # once, at the first new file
+    def consume_file(self, arrays, meta):  # accumulate; return n frames
+    def save(self, path):             # atomic write with provenance
+    def summary(self):                # one status line
+\end{lstlisting}
+Two optional hooks shape selection: \field{resolve_selection} interprets the
+user's \code{--select} for your analysis, and \field{plan_runs} splits it into
+independent runs, each with a fresh analyzer instance and its own resumable
+product. All accumulator writes happen on the engine's main thread, so no
+locking is needed. The complete walkthrough, including the inventory-metadata
+contract your reader must satisfy, is in \code{docs/ADDING_AN_ANALYZER.md}
+(and its \code{READER}/\code{SOURCE}/\code{TELESCOPE} siblings).
+
+\importantbox{If your product depends on the order files are consumed --- a
+running or trailing statistic, a CFAR baseline --- set
+\field{requires_in_order = True}. The engine will then refuse the parallel
+settings that deliver files in download-completion order, turning a silent
+wrong answer into a loud configuration error.}
+
+\section{Troubleshooting}
+\begin{tabularx}{\linewidth}{L{0.34\linewidth} Y}
+\toprule
+\textbf{Symptom} & \textbf{First move} \\
+\midrule
+``How do I even start?'' & \code{datatrawl list}, then \code{datatrawl doctor}
+with your four choices. \\
+Scan refuses to start & Read the doctor-style preflight error: missing extra,
+missing credential, or a reader/telescope mismatch. \\
+Resume refused & The existing product was built with different parameters;
+that refusal is the safety feature. Rebuild in a clean output location. \\
+Parallel flags refused & The analyzer declares \field{requires_in_order};
+run at the defaults. \\
+Anything else & \code{docs/TROUBLESHOOTING.md} in the repository. \\
+\bottomrule
+\end{tabularx}
+
+\section{Related Documents}
+\textbf{Datatrawl-DS001} (product specification: contracts, limits,
+interfaces); the \code{docs/ADDING_*.md} extension guides;
+\code{docs/DATATRAIL_BOUNDARY.md}; and, for the RAIL detector built on this
+engine, \textbf{PilotProxy-DS001/UG001}.
+
+\section{Revision History}
+\begin{tabularx}{\linewidth}{L{0.12\linewidth} L{0.20\linewidth} Y}
+\toprule
+\textbf{Rev} & \textbf{Date} & \textbf{Changes} \\
+\midrule
+v1.0 & July 1, 2026 & Initial release, documenting engine v0.1.0. \\
+\bottomrule
+\end{tabularx}
+
+\end{document}

@@ -4,6 +4,9 @@ title: "datatrawl"
 type: software
 version: 0.1.0
 authors:
+  - family-names: "Gormley"
+    given-names: "Dylan"
+    affiliation: "West Virginia University Radio Astronomy Instrumentation Lab (RAIL)"
   - name: "WVU Radio Astronomy Instrumentation Lab (RAIL)"
 repository-code: "https://github.com/WVURAIL/datatrawl"
 url: "https://github.com/WVURAIL/datatrawl"

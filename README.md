@@ -500,6 +500,21 @@ published stable API.
 > rest of `datatrawl` is settled. Technical detail lives in the `UPSTREAM NOTE`
 > in [`src/datatrawl/plugins/sources/_datatrail.py`](src/datatrawl/plugins/sources/_datatrail.py).
 
+## Build documentation
+
+The formal data sheet and user guide (`docs/Datatrawl_DS001_v1_0_Data_Sheet.tex`,
+`docs/Datatrawl_UG001_v1_0_User_Guide.tex`) share the WVURAIL house style with
+the PilotProxy documents. Generated PDFs are ignored by git. Build locally when
+needed:
+
+```bash
+mkdir -p docs/out
+(cd docs && latexmk -g -pdf -interaction=nonstopmode -halt-on-error \
+  -outdir=out Datatrawl_DS001_v1_0_Data_Sheet.tex)
+(cd docs && latexmk -g -pdf -interaction=nonstopmode -halt-on-error \
+  -outdir=out Datatrawl_UG001_v1_0_User_Guide.tex)
+```
+
 ## Release history and citation
 
 Release notes are maintained in [`CHANGELOG.md`](CHANGELOG.md). A machine-readable

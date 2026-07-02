@@ -11,6 +11,8 @@ venv/
 
 # Products / scratch (never commit data)
 *.npz
+*.pdf
+docs/out/
 inventory.jsonl
 /scratch/
 data/
