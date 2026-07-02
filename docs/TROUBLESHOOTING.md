@@ -141,3 +141,19 @@ datatrawl scan --inventory data/chime-614-706/inventory.jsonl \
 Then keep it alive: refresh the cert as it nears expiry and re-run; relaunch the
 CANFAR/GPU session if it expires and re-run. Per-freq_id products accumulate under
 `results/`, and your downstream step consumes them as they complete.
+
+## Warning: entry-point plugin failed to load (No module named ...)
+
+An installed package advertises a `datatrawl.plugins` entry point whose module
+no longer exists. Entry points are recorded in the package's install metadata
+at `pip install` time and are **not** refreshed by `git pull` in an editable
+install, so this typically means the providing package (e.g. `pilot-proxy`)
+was updated after it was installed. Fix by refreshing that package's
+metadata:
+
+```bash
+pip install -e path/to/the-providing-repo
+```
+
+datatrawl continues without the broken plugin either way; the warning only
+means that one plugin is unavailable until the metadata is refreshed.

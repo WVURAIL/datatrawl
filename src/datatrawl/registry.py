@@ -156,8 +156,12 @@ def _load_entry_point_plugins() -> None:
             ep.load()                                    # imports module -> registers
         except Exception as exc:                         # one bad plugin must not
             import warnings                              # break the whole tool
-            warnings.warn(f"datatrawl: entry-point plugin {ep.name!r} failed to "
-                          f"load: {exc}")
+            warnings.warn(
+                f"datatrawl: entry-point plugin {ep.name!r} failed to "
+                f"load: {exc}. If the providing package was updated since "
+                f"it was installed, its entry-point metadata may be stale; "
+                f"re-run `pip install -e <its repo>` to refresh it."
+            )
 
 
 def load_plugins(extra: Iterable[str] = ()) -> None:
