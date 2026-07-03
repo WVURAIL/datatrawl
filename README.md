@@ -533,17 +533,17 @@ published stable API.
 
 ## Build documentation
 
-The formal data sheet and user guide (`docs/Datatrawl_DS001_v1_0_Data_Sheet.tex`,
-`docs/Datatrawl_UG001_v1_0_User_Guide.tex`) share the WVURAIL house style with
+The formal data sheet and user guide (`docs/Datatrawl_DS001_v1_1_Data_Sheet.tex`,
+`docs/Datatrawl_UG001_v1_1_User_Guide.tex`) share the WVURAIL house style with
 the PilotProxy documents. Generated PDFs are ignored by git. Build locally when
 needed:
 
 ```bash
 mkdir -p docs/out
 (cd docs && latexmk -g -pdf -interaction=nonstopmode -halt-on-error \
-  -outdir=out Datatrawl_DS001_v1_0_Data_Sheet.tex)
+  -outdir=out Datatrawl_DS001_v1_1_Data_Sheet.tex)
 (cd docs && latexmk -g -pdf -interaction=nonstopmode -halt-on-error \
-  -outdir=out Datatrawl_UG001_v1_0_User_Guide.tex)
+  -outdir=out Datatrawl_UG001_v1_1_User_Guide.tex)
 ```
 
 ## Release history and citation

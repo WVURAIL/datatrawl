@@ -86,9 +86,9 @@
 \pagestyle{fancy}
 \fancyhf{}
 \fancyhead[L]{\small Datatrawl-DS001}
-\fancyhead[C]{\small Storage-Safe Archive Trawling Engine v0.1.0}
+\fancyhead[C]{\small Storage-Safe Archive Trawling Engine v0.2.0}
 \fancyhead[R]{\small Product Specification}
-\fancyfoot[L]{\small Datatrawl-DS001 v1.0}
+\fancyfoot[L]{\small Datatrawl-DS001 v1.1}
 \fancyfoot[C]{\small West Virginia University}
 \fancyfoot[R]{\small Page \thepage\ of \pageref{LastPage}}
 \renewcommand{\headrulewidth}{0.8pt}
@@ -96,16 +96,16 @@
 \renewcommand{\footrulewidth}{0.8pt}
 \renewcommand{\footrule}{\hbox to\headwidth{\color{TrawlAmber}\leaders\hrule height \footrulewidth\hfill}}
 
-\title{datatrawl Storage-Safe Archive Trawling Engine v0.1.0\\Product Specification}
+\title{datatrawl Storage-Safe Archive Trawling Engine v0.2.0\\Product Specification}
 \author{West Virginia University}
-\date{Datatrawl-DS001 v1.0 \\ July 1, 2026}
+\date{Datatrawl-DS001 v1.1 \\ July 3, 2026}
 
 \begin{document}
 \thispagestyle{fancy}
 {\sffamily
 \begin{minipage}[t]{0.39\textwidth}
   {\fontsize{24}{26}\selectfont\bfseries\color{TrawlAmber}datatrawl}\par
-  {\small Datatrawl-DS001 v1.0, July 1, 2026}
+  {\small Datatrawl-DS001 v1.1, July 3, 2026}
 \end{minipage}%
 \begin{minipage}[t]{0.61\textwidth}
   \raggedleft
@@ -118,7 +118,7 @@
 {\color{TrawlAmber}\hrule height 1.2pt}
 \vspace{8pt}
 
-{\small\color{TrawlGray}This product specification defines the v0.1.0 streaming
+{\small\color{TrawlGray}This product specification defines the v0.2.0 streaming
 engine contract. datatrawl is a downstream run layer: the archive authority
 (e.g.\ Datatrail/CADC) remains the source of record for what data exists;
 datatrawl fetches, streams, and deletes copies under a fixed storage budget.
@@ -146,6 +146,20 @@ on the target system.}
   \item Memory-bound inventories: \code{datatrawl survey} writes a named
         inventory directory recording the telescope/source/reader choices, so
         \code{datatrawl scan} needs only the analyzer and the inventory name.
+  \item \textbf{Selection}: \field{freq_id}s and/or events, one grammar
+        across sources --- \code{614,706}, \code{506-844},
+        \code{events:349382977}, or the dict form a \field{plan_runs}
+        returns; filters are exact and ANDed, and malformed input fails
+        loudly with the grammar named.
+  \item \textbf{Archive discovery (recon)}: \code{survey --scopes-only}
+        maps scopes and datasets with no event enumeration and no download;
+        \code{--match} filters by name, \code{--expand} opens containers one
+        level, \code{--name} labels the map, and a scope datatrail fails to
+        answer for is reported as an INCOMPLETE map, never as emptiness.
+  \item \textbf{Reader-owned archive file shape}: which files one event
+        contributes is declared by the reader (\field{survey_files});
+        inventory rows are self-describing (each records its file
+        \field{name}), so a scan stages exactly what the survey verified.
   \item Atomic product writes (\code{.tmp} then rename), per-invocation
         staging directories (concurrent scans cannot delete each other's
         files), and unit-key provenance embedded in every product.
@@ -236,7 +250,9 @@ combination. \\
 \code{datatrawl explore} & Report what data is available for a source
 (no download). \\
 \code{datatrawl survey} & Walk the archive to build a named inventory
-directory; records telescope, source, and reader. \\
+directory; records telescope, source, and reader. With \code{--scopes-only},
+recon: map scopes and datasets (\code{--match}, \code{--expand},
+\code{--name}) with no event enumeration or download. \\
 \code{datatrawl scan} & Run the streaming analyzer over an inventory
 (\code{--name}/\code{--inventory}), with \code{--select} interpreted by the
 analyzer. \\
@@ -276,8 +292,16 @@ silently consume files in download-completion order.}
         connectivity before the run starts.
   \item \textbf{Reader}: \field{probe(path)} returns file metadata;
         \field{iter_arrays(path, ctx)} streams decode-ready arrays;
-        \field{preflight(ctx)} verifies decode prerequisites.
+        \field{preflight(ctx)} verifies decode prerequisites. Optionally,
+        \field{survey_files(event, common_path, selection, ctx)} declares the
+        archive file shape for surveys, and \field{annotate_row} enriches
+        verified inventory rows.
 \end{itemize}
+The Datatrail adapter, re-exported from \code{datatrawl.plugins.sources}, is
+the one sanctioned dtcli surface for analyzers and user code;
+\field{DATATRAIL.files(scope, dataset)} lists a dataset's files
+programmatically (the \code{datatrail ps -s} view) with a contract that
+distinguishes a service outage from an empty dataset.
 
 \subsection{Registration}
 Plugins register through the \code{datatrawl.plugins} entry-point group, or
@@ -318,8 +342,9 @@ Python $\geq$ 3.9. Continuous integration runs the full suite on CPython
 \section{Compliance and Testing}
 \begin{itemize}
   \item Full pytest suite exercises the engine loop, kill/resume, ordering
-        refusal, atomic writes, inventory handling, CLI output, and the
-        built-in plugins.
+        refusal, atomic writes, inventory handling, CLI output, the built-in
+        plugins, the selection grammar, recon (including outage handling),
+        and the per-event/companion composition end to end through the CLI.
   \item Release job builds sdist+wheel, runs \code{twine check}, installs the
         wheel in a clean venv, and verifies the Datatrail dependency
         contract.
@@ -346,6 +371,10 @@ Python $\geq$ 3.9. Continuous integration runs the full suite on CPython
 \textbf{Rev} & \textbf{Date} & \textbf{Changes} \\
 \midrule
 v1.0 & July 1, 2026 & Initial release, documenting engine v0.1.0. \\
+v1.1 & July 3, 2026 & Engine v0.2.0: recon (\code{--scopes-only} with
+\code{--match}/\code{--expand}/\code{--name}, telescope-scoped), event
+selection grammar, reader-owned archive file shape (\code{survey --reader}),
+\code{DATATRAIL.files()}, per-event fan-out and companion patterns. \\
 \bottomrule
 \end{tabularx}
 

@@ -80,9 +80,9 @@
 \pagestyle{fancy}
 \fancyhf{}
 \fancyhead[L]{\small Datatrawl-UG001}
-\fancyhead[C]{\small Storage-Safe Archive Trawling Engine v0.1.0}
+\fancyhead[C]{\small Storage-Safe Archive Trawling Engine v0.2.0}
 \fancyhead[R]{\small User Guide}
-\fancyfoot[L]{\small Datatrawl-UG001 v1.0}
+\fancyfoot[L]{\small Datatrawl-UG001 v1.1}
 \fancyfoot[C]{\small West Virginia University}
 \fancyfoot[R]{\small Page \thepage\ of \pageref{LastPage}}
 \renewcommand{\headrulewidth}{0.8pt}
@@ -90,16 +90,16 @@
 \renewcommand{\footrulewidth}{0.8pt}
 \renewcommand{\footrule}{\hbox to\headwidth{\color{TrawlAmber}\leaders\hrule height \footrulewidth\hfill}}
 
-\title{datatrawl Storage-Safe Archive Trawling Engine v0.1.0\\User Guide}
+\title{datatrawl Storage-Safe Archive Trawling Engine v0.2.0\\User Guide}
 \author{West Virginia University}
-\date{Datatrawl-UG001 v1.0 \\ July 1, 2026}
+\date{Datatrawl-UG001 v1.1 \\ July 3, 2026}
 
 \begin{document}
 \thispagestyle{fancy}
 {\sffamily
 \begin{minipage}[t]{0.39\textwidth}
   {\fontsize{24}{26}\selectfont\bfseries\color{TrawlAmber}datatrawl}\par
-  {\small Datatrawl-UG001 v1.0, July 1, 2026}
+  {\small Datatrawl-UG001 v1.1, July 3, 2026}
 \end{minipage}%
 \begin{minipage}[t]{0.61\textwidth}
   \raggedleft
@@ -150,6 +150,33 @@ datatrawl doctor --telescope chime --source cadc-datatrail \
 \code{doctor} reports, per choice, what is installed, what is configured, what
 credentials are missing, and whether the combination is ready to run.
 
+Before committing to any of that, map the archive itself. Recon is
+\code{survey}'s no-download mode: it lists datasets across scopes and writes
+the result as a reusable map (\code{scopes.jsonl}, or
+\code{scopes-<name>.jsonl} with \code{--name}, so successive recons do not
+overwrite each other):
+\begin{lstlisting}
+datatrawl survey --telescope gbo --scopes-only              # this telescope's scopes
+datatrawl survey --scopes-only                              # every scope datatrail sees
+datatrawl survey --telescope gbo --scopes-only \
+    --scope gbo.acquisition.processed --match gain --expand --name gains
+\end{lstlisting}
+\code{--telescope} narrows the walk to that telescope's \emph{live} scopes
+(first name component --- deliberately not the instrument YAML, which declares
+only what the event survey walks); omit it for zero-knowledge discovery.
+\code{--match} keeps name matches (comma-separated terms, ANDed);
+\code{--expand} opens each kept dataset one level, so a container such as
+\code{complex_gains} yields its children as rows (with a \field{parent}
+column). Every row resolves directly with
+\code{datatrail ps <scope> <dataset> -s}. A scope datatrail fails to answer
+for is named in-walk and in a closing \code{[warn]} block marking the map
+INCOMPLETE --- an outage is never mistaken for emptiness.
+\notebox{Recon finds names; survey's event walk enumerates \emph{event-keyed}
+data only. A container of timestamped, non-event products (calibration
+acquisitions) is reached through recon \code{--expand} and the programmatic
+file listing \code{DATATRAIL.files()}, never through an event survey. The
+split is spelled out in \code{docs/DATATRAIL_BOUNDARY.md}.}
+
 \section{Building an Inventory}
 \code{survey} walks the archive once and writes a named inventory directory
 (default \code{data/<telescope>-fid<freq_ids>/}, or \code{--name}); it records
@@ -162,15 +189,28 @@ datatrawl survey  --telescope chime --source cadc-datatrail   # -> data/chime...
 Inventories stream from disk during a scan; the engine never needs the whole
 archive listing in memory.
 
+The reader also owns the \emph{archive file shape}: which files one event
+contributes and what they are named (\field{Reader.survey_files}). Survey
+resolves the telescope's canonical reader (override with \code{--reader}) and
+writes each verified file's \field{name} into its row, so a later scan stages
+exactly what the survey verified --- the two cannot drift. A non-baseband
+product becomes surveyable by loading a small external shape reader with
+\code{--plugin}; see \code{docs/ADDING_A_READER.md}.
+
 \section{Running a Scan}
 \begin{lstlisting}
 datatrawl scan --name chime --analyzer spectrum --select 614,706
 \end{lstlisting}
 \begin{itemize}
-  \item \code{--select} is interpreted by the analyzer (for the spectrum
+  \item \code{--select} is interpreted by the analyzer. For the spectrum
         analyzer: explicit \field{freq_id}s such as \code{844},
-        \code{614,706}, or ranges like \code{506-552}); a multi-item selection
-        becomes independent products that resume and fail independently.
+        \code{614,706}, or ranges like \code{506-552}. Event-oriented
+        analyzers take \code{events:349382977[,...]}, and a
+        \field{plan_runs} may return the dict form
+        \code{{"events": [...], "freq_ids": ...}}; filters are exact and
+        ANDed, and a malformed selection fails with the grammar named, not a
+        traceback. A multi-item selection becomes independent products that
+        resume and fail independently.
   \item \code{--checkpoint-every N} (default 50) sets how many files may need
         re-processing after a kill; each checkpoint is an atomic full-product
         save.
@@ -241,6 +281,22 @@ locking is needed. The complete walkthrough, including the inventory-metadata
 contract your reader must satisfy, is in \code{docs/ADDING_AN_ANALYZER.md}
 (and its \code{READER}/\code{SOURCE}/\code{TELESCOPE} siblings).
 
+Two patterns built on those hooks are worked end to end in the repository.
+\emph{Per-event fan-out}: \field{plan_runs} returns one
+\code{{"events": [ev], "freq_ids": spec}} sub-selection per event, so each
+event becomes its own resumable product
+(\code{ev<event>[_<freq_ids>].npz}); both archive and local sources
+understand the dict natively. \emph{Companion side-loads}: an analyzer
+needing a per-event auxiliary (calibration gains, flags) loads its lookup
+once in \field{begin} and resolves per file off \field{meta["event"]},
+stamping the companion's identity into the product and refusing a resume if
+the lookup later disagrees. Day-keyed companion archives resolve lazily with
+\code{DATATRAIL.files(scope, day)}, imported from
+\code{datatrawl.plugins.sources} --- the programmatic
+\code{datatrail ps -s}. The runnable, CLI-tested reference is
+\code{examples/per_event_companions.py}; the patterns are written out in
+\code{docs/ADDING_AN_ANALYZER.md}.
+
 \importantbox{If your product depends on the order files are consumed --- a
 running or trailing statistic, a CFAR baseline --- set
 \field{requires_in_order = True}. The engine will then refuse the parallel
@@ -276,6 +332,10 @@ engine, \textbf{PilotProxy-DS001/UG001}.
 \textbf{Rev} & \textbf{Date} & \textbf{Changes} \\
 \midrule
 v1.0 & July 1, 2026 & Initial release, documenting engine v0.1.0. \\
+v1.1 & July 3, 2026 & Engine v0.2.0: recon (\code{--scopes-only} with
+\code{--match}/\code{--expand}/\code{--name}, telescope-scoped), event
+selection grammar, reader-owned archive file shape (\code{survey --reader}),
+\code{DATATRAIL.files()}, per-event fan-out and companion patterns. \\
 \bottomrule
 \end{tabularx}
 

@@ -27,6 +27,12 @@ PAGER=cat datatrail ps <scope> <dataset> -s
 PAGER=cat datatrail scout <scope> <dataset>
 ```
 
+datatrawl reaches this hierarchy without reinventing it: recon
+(`survey --scopes-only`, with `--expand` to open a container one level) writes
+the `ls` view as a reusable map, and `DATATRAIL.files(scope, dataset)` --
+importable from `datatrawl.plugins.sources` -- is the programmatic `ps -s`,
+with a contract that never lets a service outage read as emptiness.
+
 ## datatrawl owns
 
 `datatrawl` answers:
@@ -78,7 +84,9 @@ PAGER=cat datatrail ls gbo.acquisition.processed 20230512T012608Z_gbo_corr
 ```
 
 If the child dataset table is empty too, then the registered dataset appears empty through
-Datatrail and survey should skip it.
+Datatrail and survey should skip it. Recon's `--expand` runs exactly this
+child check across every matched dataset at once, and `files()` is the
+empty-versus-outage-aware form of the `ps -s` probe.
 
 ## Required user knowledge
 

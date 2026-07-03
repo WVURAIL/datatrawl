@@ -7,6 +7,17 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+### Changed
+
+- DS001/UG001 rolled to v1.1 (files renamed to match), documenting engine
+  v0.2.0: recon (`--scopes-only` with `--match`/`--expand`/`--name`,
+  telescope-scoped), the event selection grammar, the reader-owned archive
+  file shape (`survey --reader`), `DATATRAIL.files()`, and the per-event
+  fan-out / companion side-load patterns. `docs/DATATRAIL_BOUNDARY.md` now
+  cross-references the datatrawl mechanisms that consume each side of the
+  datatrail hierarchy (recon `--expand` for the `ls` view, `files()` for the
+  `ps -s` view).
+
 ## [0.2.0] - 2026-07-03
 
 ### Added
