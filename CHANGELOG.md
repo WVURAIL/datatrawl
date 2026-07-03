@@ -7,6 +7,8 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-07-03
+
 ### Added
 
 - Event-scoped selection, shared across sources: `--select events:<id>[,...]`
@@ -16,6 +18,8 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - Per-event fan-out and auxiliary-input (gains/flags/companions) patterns
   documented in `docs/ADDING_AN_ANALYZER.md`, with a worked offline join in
   `examples/match_inventories.py`.
+- The worked per-event example reports a per-product summary (event,
+  companion, lag, mean power) on the engine's done line.
 - `examples/per_event_companions.py`: runnable reference for the per-event +
   companion pattern (plan from the companion table, side-load in `begin()`,
   companion identity stamped and resume-validated), driven end to end through

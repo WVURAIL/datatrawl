@@ -95,6 +95,8 @@ def test_per_event_scan_end_to_end(workspace):
     root, src_root, comp = workspace
     rc, out = _scan(root, src_root, comp)
     assert rc == 0
+    # the done line carries the example's summary (event + companion), not {}
+    assert f"'event': '{EV_OK1}'" in out and GAIN_OK1 in out
     # the stale event is skipped BEFORE any staging, and says so
     assert f"skipping event {EV_STALE}" in out
     assert not os.path.exists(_product(root, EV_STALE))

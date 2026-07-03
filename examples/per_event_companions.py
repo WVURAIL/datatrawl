@@ -146,6 +146,13 @@ class PerEventCompanionDemo(AccumulatingAnalyzer):
         self._power_sum = float(z["power_sum"])
         self._n_frames = int(z["n_frames"])
 
+    def summary(self):
+        # printed on the engine's per-product "done:" line -- a worked example
+        # should show its result there, not "{}"
+        return {"event": self._event, "companion": self._companion_name,
+                "lag_days": self._companion_lag, "files": len(self._names),
+                "mean_power": round(self._product()["mean_power"], 4)}
+
     def resume(self, path: str, ctx: RunContext) -> bool:
         if not os.path.exists(path):
             return False
