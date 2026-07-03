@@ -60,7 +60,7 @@ archive data. Typical lines are:
 
 ```text
 [survey] chime via cadc-datatrail -> data/chime-spectrum-844
-[survey] scopes=['chime.event.baseband.raw'] freq_ids=1 (844..844) -> data/chime-spectrum-844/inventory.jsonl
+[survey] scopes=['chime.event.baseband.raw'] shape=chime-baseband freq_ids=1 (844..844) -> data/chime-spectrum-844/inventory.jsonl
 to survey: 80 events
 resume: 12 events already done
 [15/80] <event>: 1/1 files

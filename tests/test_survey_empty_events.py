@@ -34,8 +34,6 @@ import shutil
 import sys
 import tempfile
 
-import pytest
-
 import datatrawl.cli as cli
 from datatrawl.plugins.sources import cadc_datatrail
 from datatrawl.interfaces import RunContext

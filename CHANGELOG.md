@@ -108,5 +108,6 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - External plugin loading by file, module, environment variable, or entry point.
 - Quarantine handling, bounded scratch staging, preflight checks, and offline tests.
 
-[Unreleased]: https://github.com/WVURAIL/datatrawl/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/WVURAIL/datatrawl/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/WVURAIL/datatrawl/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/WVURAIL/datatrawl/releases/tag/v0.1.0
