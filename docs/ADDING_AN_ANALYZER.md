@@ -239,6 +239,34 @@ unit -- you are fighting the one-file-at-a-time streaming model, and the honest
 answer is a different design (pre-combine the products upstream, or a
 different tool), not a bigger side-load.
 
+**Day-keyed archives: resolve lazily instead.** Some companion products are
+organized by DAY, not by event -- CHIME calibration gains, for instance, live
+as one dataset per date with the files inside. There the offline join
+dissolves: the recon map (`--scopes-only --match ... --expand --name gains`)
+already lists exactly which days exist, and the analyzer resolves its
+companion per event with one archive call:
+
+```python
+import json
+from datatrawl.plugins.sources import DATATRAIL
+
+days = sorted(json.loads(l)["dataset"]                 # scopes-gains.jsonl
+              for l in open(ctx.options["gains_map"]))
+day = max(d for d in days if d <= event_date)          # nearest present day
+cp, names, ok = DATATRAIL.files("gbo.acquisition.processed", day)
+if not ok:
+    raise RuntimeError("datatrail did not answer -- retry, don't skip")
+gain = pick(names)          # YOUR policy: calibrator, noise_weighted, ...
+uri = f"{cp}/{gain}"        # fetch with cadcget; cache per event
+```
+
+`DATATRAIL.files()` is the programmatic `datatrail ps -s` -- use it (via
+`datatrawl.plugins.sources`) rather than scraping the table or importing
+dtcli internals; the adapter is the one sanctioned dtcli surface. ok=False
+means the service did not answer, which is never the same as "no gain".
+Which file on a day is THE companion is science policy, not archive
+mechanics -- same rule as always.
+
 Steps 2--4 are worked, runnable, and CLI-tested in
 [`examples/per_event_companions.py`](../examples/per_event_companions.py):
 companion loaded in `begin()`, resolved off `meta["event"]`, stamped into the

@@ -23,6 +23,10 @@ companion is staler than --set max_gain_lag_days is skipped, visibly, before a
 byte is staged. Planning from the table (rather than the inventory) also makes
 the same analyzer work unchanged against archive and local sources.
 
+For DAY-keyed companion archives (e.g. CHIME calibration gains: one dataset
+per date), skip the join table entirely and resolve lazily in begin() with
+DATATRAIL.files() -- see "Day-keyed archives" in docs/ADDING_AN_ANALYZER.md.
+
 The science here is a stand-in -- mean |x|^2 over the stream, standing where a
 real analysis would apply the companion (e.g. beamform baseband with a gain
 solution). Every datatrawl integration point around it is real, and

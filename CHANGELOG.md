@@ -48,6 +48,18 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
   'Service not responding.' records defeated the level-based mute. The mute
   now blocks propagation and detached handlers, which dtcli never touches.
 
+### Added (companion resolution)
+
+- `Datatrail.files(scope, dataset)` -- the programmatic `datatrail ps -s`:
+  (common_path, names, ok) with the same prefixing and outage-vs-empty
+  contract as `common_path()`, normalization replicating dtcli's own. `ps`
+  joined `_REQUIRED_FUNCS`, so doctor validates it up front. The adapter is
+  re-exported from `datatrawl.plugins.sources` as the sanctioned import
+  path. Documented as the lazy per-event resolution pattern for day-keyed
+  companion archives (gains) in `docs/ADDING_AN_ANALYZER.md`, where the
+  offline join dissolves into the recon map plus one `files()` call per
+  event.
+
 ### Changed (survey CLI)
 
 - `--telescope` on `survey` now narrows recon (`--scopes-only`) to that

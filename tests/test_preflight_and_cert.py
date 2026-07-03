@@ -57,13 +57,16 @@ def _clean_env_source(monkeypatch):
     return s
 
 
-def _install_fake_dtcli(monkeypatch, with_symbol=True, list_impl=None):
+def _install_fake_dtcli(monkeypatch, with_symbol=True, list_impl=None,
+                        ps_impl=None, with_ps=True):
     dtcli = types.ModuleType("dtcli")
     src_mod = types.ModuleType("dtcli.src")
     funcs = types.ModuleType("dtcli.src.functions")
     funcs.list = list_impl or (lambda *a, **k: {})   # callable; body unused unless tested
     if with_symbol:
         funcs.find_dataset_common_path = lambda *a, **k: None
+    if with_ps:
+        funcs.ps = ps_impl or (lambda *a, **k: (None, None))
     src_mod.functions = funcs
     dtcli.src = src_mod
     monkeypatch.setitem(sys.modules, "dtcli", dtcli)
@@ -157,6 +160,42 @@ def test_listing_via_functions_api(monkeypatch):
     assert calls["last"] == ("chime.event.baseband.raw", None)
     assert src.DATATRAIL.events_in_dataset("chime.event.baseband.raw", "2024") == \
         ["123456789", "987654321"]
+
+
+def test_files_via_functions_ps(monkeypatch):
+    """files() = the programmatic `ps -s`: normalization replicates dtcli's
+    own (prefix strip, // collapse, commonprefix trimmed to the last /)."""
+    day_uris = [
+        "cadc:CHIMEFRB/data/gbo/complex_gains/20230530/gain_A_casa.h5",
+        "cadc:CHIMEFRB/data/gbo//complex_gains/20230530/gain_B_cyga.h5",
+    ]
+    _install_fake_dtcli(
+        monkeypatch, with_symbol=True,
+        ps_impl=lambda *a, **k: (
+            {"file_replica_locations": {"minoc": list(day_uris)}}, {"p": 1}))
+    cp, names, ok = src.DATATRAIL.files("gbo.acquisition.processed", "20230530")
+    assert ok
+    assert cp == "cadc:CHIMEFRB/data/gbo/complex_gains/20230530"
+    assert names == ["gain_A_casa.h5", "gain_B_cyga.h5"]
+    # a fetch URI is exactly path/name -- the same join enumerate uses
+    assert f"{cp}/{names[0]}" == day_uris[0]
+
+
+def test_files_no_minoc_and_outage(monkeypatch):
+    _install_fake_dtcli(monkeypatch, ps_impl=lambda *a, **k: (
+        {"file_replica_locations": {"arc": ["x"]}}, {}))
+    assert src.DATATRAIL.files("s", "d") == (None, [], True)   # answered: no bytes
+    def boom(*a, **k):
+        raise ConnectionError("Datatrail Server at CHIME is not responding.")
+    _install_fake_dtcli(monkeypatch, ps_impl=boom)
+    cp, names, ok = src.DATATRAIL.files("s", "d", retries=0)
+    assert (cp, names, ok) == (None, [], False)                # outage, not empty
+
+
+def test_api_available_flags_missing_ps(monkeypatch):
+    _install_fake_dtcli(monkeypatch, with_symbol=True, with_ps=False)
+    ok, detail = src.Datatrail.api_available()
+    assert not ok and "ps" in detail
 
 
 def test_listing_error_degrades_to_empty(monkeypatch):

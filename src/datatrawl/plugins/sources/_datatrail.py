@@ -39,6 +39,7 @@ from __future__ import annotations
 
 import contextlib
 import logging
+import os
 import re
 import sys
 import time
@@ -49,7 +50,7 @@ from typing import List
 _EVENT_RE = re.compile(r"\b\d{6,}\b")
 
 # the dtcli.src.functions symbols datatrawl calls -- checked by api_available().
-_REQUIRED_FUNCS = ("list", "find_dataset_common_path")
+_REQUIRED_FUNCS = ("list", "find_dataset_common_path", "ps")
 
 # dtcli configures a root RichHandler (dtcli/__init__.py basicConfig) and logs
 # through these named loggers. When its config file is absent, config.procure()
@@ -213,6 +214,63 @@ class Datatrail:
         """Event IDs under one larger-dataset (extracted from child names)."""
         return [ev for name in self.children(scope, dataset)
                 for ev in _EVENT_RE.findall(name)]
+
+    # -- file listing (the programmatic half of `datatrail ps -s`) ----------
+    def files(self, scope: str, dataset: str, *, retries: int = 3,
+              base: float = 4.0) -> tuple:
+        """(common_path, [names], ok) for one dataset's minoc files.
+
+        This is what `datatrail ps <scope> <dataset> -s` renders as a table:
+        the CADC common path plus each file under it. Exposed here so an
+        analyzer resolving a per-day companion (a gains day-dataset, say)
+        never scrapes the Rich table or imports dtcli internals itself --
+        this adapter is chartered as the ONE place datatrawl touches dtcli.
+
+        Contract mirrors common_path():
+          (None, [], False)  = the service did not answer (retried);
+          (None, [], True)   = queried OK, no minoc files for this dataset;
+          (path, names, True) = resolved. `path` is prefixed cadc:CHIMEFRB/
+                                like common_path(); `names` are relative to
+                                it, in server order, so a fetch URI is
+                                f"{path}/{name}".
+
+        Normalization replicates dtcli's own (find_dataset_common_path):
+        strip the cadc:CHIMEFRB/ prefix, collapse '//', commonprefix trimmed
+        to the last '/'.
+        """
+        try:
+            functions = _functions()
+        except Exception:
+            return None, [], False
+        delay = base
+        for k in range(retries + 1):
+            try:
+                with _quiet_dtcli_logging():
+                    files_resp, _policy = functions.ps(scope, dataset,
+                                                       quiet=True)
+            except Exception:
+                if k < retries:
+                    time.sleep(delay)
+                    delay *= 2
+                    continue
+                return None, [], False        # transport failure, retried out
+            # ps returns (None, policy) when the server answered with an
+            # error for the files half -- for a dataset the map says exists,
+            # that reads as "no files", same as common_path's no-minoc case.
+            if not isinstance(files_resp, dict):
+                return None, [], True
+            uris = (files_resp.get("file_replica_locations") or {}).get("minoc")
+            if not uris:
+                return None, [], True
+            paths = [str(u).replace("//", "/").replace("cadc:CHIMEFRB/", "")
+                     for u in uris]
+            common = os.path.commonprefix(paths)
+            if not common.endswith("/"):
+                common = "/".join(common.split("/")[:-1])
+            common = common.rstrip("/")
+            names = [p[len(common):].lstrip("/") for p in paths]
+            return f"cadc:CHIMEFRB/{common.lstrip('/')}", names, True
+        return None, [], False
 
     # -- common-path resolution --------------------------------------------
     def common_path(self, scope: str, event: str, *, retries: int = 3,
