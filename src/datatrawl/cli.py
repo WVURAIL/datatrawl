@@ -400,6 +400,7 @@ def _collect_options(args) -> dict:
         "workers": getattr(args, "workers", None),
         "re_enumerate": getattr(args, "re_enumerate", False),
         "scopes_only": getattr(args, "scopes_only", False),
+        "name": getattr(args, "name", None),
         "match": getattr(args, "match", None),
         "expand": getattr(args, "expand", False),
         "max_inspect": getattr(args, "max_inspect", None),
@@ -1066,8 +1067,11 @@ def build_parser() -> argparse.ArgumentParser:
                           help="explicit inventory output directory "
                                "(overrides <root>/data/<name>/)")
     p_survey.add_argument("--name", default=None,
-                          help="name this inventory -> data/<name>/ "
-                               "(default: derived from telescope + freq_ids)")
+                          help="name this inventory -> data/<name>/ (default: "
+                               "derived from telescope + freq_ids). With "
+                               "--scopes-only, names the recon map instead -> "
+                               "data/scopes-<name>.jsonl, so successive recons "
+                               "(gains, n2) don't overwrite each other.")
     p_survey.add_argument("--reader", default=None,
                           help="reader whose archive file shape drives the survey "
                                "(which files one event contributes; see "

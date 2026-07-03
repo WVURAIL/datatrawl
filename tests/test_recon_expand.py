@@ -51,8 +51,14 @@ _LANDSCAPE = {
 
 
 @contextlib.contextmanager
-def fake_landscape():
-    """Patch the three listing methods on the SHARED adapter instance.
+def fake_landscape(down=()):
+    """Patch the CHECKED listing methods on the SHARED adapter instance.
+
+    `down` is a set of scopes for which datatrail 'does not answer': their
+    dataset listing (and any children listing under them) reports ok=False --
+    the field failure mode recon must surface as an INCOMPLETE map. The
+    unchecked methods delegate to these through `self`, so they see the fakes
+    too.
 
     Instance-level, not class-level, deliberately: other tests in this suite
     monkeypatch attributes on `cadc_datatrail.DATATRAIL`, and monkeypatch's
@@ -61,10 +67,16 @@ def fake_landscape():
     same instance (and deleting on exit anything that was not an instance
     attribute before) is immune to that, and leaves no shadow of our own.
     """
+    down = set(down)
     tgt = cadc_datatrail.DATATRAIL
-    fakes = {"list_scopes": lambda: list(_LANDSCAPE),
-             "list_datasets": lambda s: list(_LANDSCAPE.get(s, {})),
-             "children": lambda s, d: list(_LANDSCAPE.get(s, {}).get(d, []))}
+    fakes = {
+        "list_scopes_checked": lambda: (list(_LANDSCAPE), True),
+        "list_datasets_checked": lambda s: (
+            ([], False) if s in down else (list(_LANDSCAPE.get(s, {})), True)),
+        "children_checked": lambda s, d: (
+            ([], False) if s in down
+            else (list(_LANDSCAPE.get(s, {}).get(d, [])), True)),
+    }
     sentinel = object()
     saved = {n: tgt.__dict__.get(n, sentinel) for n in fakes}
     for n, f in fakes.items():
@@ -198,6 +210,57 @@ def test_recon_runs_without_telescope_event_survey_does_not(tmp_path):
     with contextlib.redirect_stderr(err):
         rc = cli.main(["survey", "--root", str(tmp_path)])
     assert rc == 2 and "--telescope is required" in err.getvalue()
+
+
+# --------------------------------------------------------------------------
+# outages are never emptiness: the field failure was a mid-walk 'Service not
+# responding.' that silently dropped a whole scope from a clean-looking map
+# --------------------------------------------------------------------------
+def test_outage_scope_is_reported_not_silently_empty(tmp_path):
+    ctx = RunContext(instrument=_Tel("gbo"), selection=None,
+                     options={"scopes_only": True, "expand": True})
+    buf = io.StringIO()
+    with fake_landscape(down={GBO_EVT}), contextlib.redirect_stdout(buf):
+        path = cadc_datatrail.CadcDatatrailSource().survey(ctx, str(tmp_path))
+    out = buf.getvalue()
+    rows = [json.loads(l) for l in open(path) if l.strip()]
+    # the healthy scope's rows are all present ...
+    assert any(r.get("parent") == "complex_gains" for r in rows)
+    # ... and the unanswered scope is NAMED, in-walk and in a closing [warn]
+    assert "NOT LISTED" in out
+    assert "INCOMPLETE" in out and GBO_EVT in out
+
+
+def test_total_listing_outage_is_fatal(tmp_path):
+    tgt = cadc_datatrail.DATATRAIL
+    sentinel = object()
+    old = tgt.__dict__.get("list_scopes_checked", sentinel)
+    tgt.list_scopes_checked = lambda: ([], False)      # datatrail fully down
+    try:
+        ctx = RunContext(instrument=None, selection=None,
+                         options={"scopes_only": True})
+        with pytest.raises(SystemExit) as ei:
+            cadc_datatrail.CadcDatatrailSource().survey(ctx, str(tmp_path))
+        assert "nothing to walk" in str(ei.value)
+    finally:
+        if old is sentinel:
+            del tgt.list_scopes_checked
+        else:
+            tgt.list_scopes_checked = old
+
+
+def test_name_labels_the_recon_map(tmp_path):
+    with fake_landscape(), contextlib.redirect_stdout(io.StringIO()):
+        rc = cli.main(["survey", "--telescope", "gbo", "--scopes-only",
+                       "--match", "gain", "--expand", "--name", "gains",
+                       "--root", str(tmp_path)])
+    assert rc == 0
+    named = os.path.join(str(tmp_path), "data", "scopes-gains.jsonl")
+    assert os.path.exists(named)
+    assert not os.path.exists(
+        os.path.join(str(tmp_path), "data", "scopes.jsonl"))
+    rows = [json.loads(l) for l in open(named)]
+    assert any(r.get("parent") == "complex_gains" for r in rows)
 
 
 if __name__ == "__main__":

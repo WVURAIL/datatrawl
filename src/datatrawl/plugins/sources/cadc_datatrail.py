@@ -139,10 +139,13 @@ def _keep(text: str, terms: List[str]) -> bool:
 
 
 def _recon(named_scopes, match_terms: List[str], out_dir: str,
-           expand: bool = False, telescope=None) -> str:
+           expand: bool = False, telescope=None,
+           map_name: str = "scopes.jsonl") -> str:
     """Recursive `datatrail ls`: list the datasets under each scope, with NO
     event/file enumeration -- the cross-scope survey-of-the-landscape datatrail
-    itself can't do in one call. Writes scopes.jsonl and prints a readable map.
+    itself can't do in one call. Writes `map_name` (default scopes.jsonl;
+    --name labels it scopes-<name>.jsonl so successive recons -- gains, n2 --
+    don't overwrite each other) and prints a readable map.
 
     Scope resolution, in precedence order: explicit `named_scopes` (--scope)
     are walked verbatim; else `telescope` keeps the live scopes whose FIRST
@@ -154,15 +157,22 @@ def _recon(named_scopes, match_terms: List[str], out_dir: str,
     gains that motivated this live in a scope no YAML declares). Filtering to
     zero scopes is a loud error, never a silent empty map.
 
+    OUTAGES ARE NEVER EMPTINESS: every listing here uses the adapter's checked
+    form, so a scope (or a container's children) that datatrail could not
+    answer for is tallied and reported in a closing [warn] naming the map
+    INCOMPLETE -- a field run once lost an entire scope to a mid-walk 'Service
+    not responding.' whose only trace was one scrolled-past stderr line, while
+    recon exited 0 with a clean-looking map. If the top-level scope listing
+    itself fails there is nothing to walk at all, and that is fatal.
+
     Rows are {scope, dataset}. With `expand`, each kept dataset is opened ONE
     level and its rows become the children -- {scope, dataset: <child>,
     parent: <container>} -- so every row is directly resolvable with
     `datatrail ps <scope> <dataset> -s`. That is the difference between finding
     a container (a --match hit like `complex_gains`) and having the timestamped
     acquisitions inside it in hand. A dataset that yields no children keeps its
-    own row: it may be file-bearing, genuinely empty, or unreadable right now
-    (the adapter's [] covers all three), so nothing found is ever dropped from
-    the map.
+    own row: file-bearing and genuinely-empty look alike at this level, and
+    nothing found is ever dropped from the map.
 
     Filtering is name-level only (instrument / type / format as they appear in
     the scope & dataset names); deeper criteria like validity or exact frequency
@@ -174,7 +184,17 @@ def _recon(named_scopes, match_terms: List[str], out_dir: str,
     if named_scopes:
         scopes = list(named_scopes)              # explicit --scope wins
     else:
-        scopes = DATATRAIL.list_scopes()
+        scopes, ok = DATATRAIL.list_scopes_checked()
+        if not ok:
+            raise SystemExit(
+                "datatrail could not list its scopes (service not "
+                "responding?) -- there is nothing to walk. Re-run this recon "
+                "when the service answers, or name scopes explicitly with "
+                "--scope.")
+        if not scopes:
+            raise SystemExit("datatrail reports zero scopes -- nothing to "
+                             "walk (an account/config problem, not an empty "
+                             "archive).")
         if telescope:
             tel, n_all = str(telescope).lower(), len(scopes)
             scopes = [s for s in scopes
@@ -191,12 +211,18 @@ def _recon(named_scopes, match_terms: List[str], out_dir: str,
           + (f"; match={match_terms}" if match_terms else "")
           + ("; expanding matches one level" if expand else ""), flush=True)
 
-    map_path = out / "scopes.jsonl"
+    map_path = out / map_name
     rows = n_expanded = 0
+    failed: List[str] = []          # human-readable "what datatrail wouldn't list"
     cap = 20                        # child names printed per dataset; file gets all
     with open(map_path, "w") as fh:
         for i, s in enumerate(scopes, 1):
-            datasets = DATATRAIL.list_datasets(s)
+            datasets, ok = DATATRAIL.list_datasets_checked(s)
+            if not ok:
+                failed.append(f"datasets under scope {s}")
+                print(f"  [{i:>3}/{len(scopes)}] {s}  -- NOT LISTED "
+                      f"(datatrail error; see [warn] below)", flush=True)
+                continue
             kept = ([d for d in datasets if _keep(f"{s} {d}", match_terms)]
                     if match_terms else datasets)
             if not kept:
@@ -204,14 +230,22 @@ def _recon(named_scopes, match_terms: List[str], out_dir: str,
             print(f"  [{i:>3}/{len(scopes)}] {s}  ({len(kept)} dataset(s))",
                   flush=True)
             for d in kept:
-                children = DATATRAIL.children(s, d) if expand else []
+                children, ch_ok = (DATATRAIL.children_checked(s, d)
+                                   if expand else ([], True))
+                if expand and not ch_ok:
+                    failed.append(f"children of {s} {d}")
+                    print(f"        {d}  (children NOT listed -- datatrail "
+                          f"error; container row kept)")
+                    fh.write(json.dumps({"scope": s, "dataset": d}) + "\n")
+                    rows += 1
+                    continue
                 if children:
                     print(f"        {d}  ({len(children)} child(ren))")
                     for c in children[:cap]:
                         print(f"            {c}")
                     if len(children) > cap:
                         print(f"            ... and {len(children) - cap} more "
-                              f"(all in scopes.jsonl)")
+                              f"(all in {map_name})")
                     for c in children:
                         fh.write(json.dumps({"scope": s, "dataset": c,
                                              "parent": d}) + "\n")
@@ -239,6 +273,12 @@ def _recon(named_scopes, match_terms: List[str], out_dir: str,
           + (f" ({n_expanded} dataset(s) expanded)" if expand else "")
           + f". This is a discovery map, not the scan inventory. {tail}",
           flush=True)
+    if failed:
+        print("\n[warn] the map is INCOMPLETE -- datatrail did not answer for:"
+              + "".join(f"\n    {f}" for f in failed)
+              + f"\n  Rows for these are missing from (or unexpanded in) "
+              f"{map_path}. Re-run this recon when the service responds; the "
+              f"walk is cheap and rebuilds the whole map.", flush=True)
     return str(map_path)
 
 
@@ -480,9 +520,12 @@ class CadcDatatrailSource(DataSource):
                        if str(s).strip())
                  if scope_opt else None)
         if o.get("scopes_only"):                 # recon: recursive `datatrail ls`
+            label = o.get("name")
             return _recon(named, _match_terms(o.get("match")), out_dir,
                           expand=bool(o.get("expand", False)),
-                          telescope=getattr(ctx.instrument, "name", None))
+                          telescope=getattr(ctx.instrument, "name", None),
+                          map_name=(f"scopes-{label}.jsonl" if label
+                                    else "scopes.jsonl"))
         inst_scopes = tuple(getattr(ctx.instrument, "scopes", ()) or ())
         scopes = named or inst_scopes or _DEFAULT_SCOPES
         n_ch = ctx.instrument.n_channels if ctx.instrument is not None else 0

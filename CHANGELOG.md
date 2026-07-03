@@ -32,6 +32,22 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
   containers keep their own row. The `Datatrail` adapter grew `children()`
   (the raw list `events_in_dataset` already extracted from).
 
+### Added (recon robustness, from the first live run)
+
+- Recon `--name`: labels the map `data/scopes-<name>.jsonl` so successive
+  recons (gains, n2) don't overwrite each other; default `scopes.jsonl`
+  unchanged.
+- Outages are never emptiness: recon now uses checked listings (adapter grew
+  `list_scopes_checked` / `list_datasets_checked` / `children_checked`), so a
+  scope or container datatrail could not answer for is named in-walk and in a
+  closing `[warn] the map is INCOMPLETE` block instead of silently missing
+  from a clean-looking map. A total scope-listing failure is fatal with an
+  actionable message.
+- dtcli log leak fixed: datatrail-cli re-arms its own logger level inside
+  every call (`set_log_level` under `quiet=True` sets ERROR), so its
+  'Service not responding.' records defeated the level-based mute. The mute
+  now blocks propagation and detached handlers, which dtcli never touches.
+
 ### Changed (survey CLI)
 
 - `--telescope` on `survey` now narrows recon (`--scopes-only`) to that

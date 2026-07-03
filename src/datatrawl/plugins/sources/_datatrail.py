@@ -58,22 +58,37 @@ _REQUIRED_FUNCS = ("list", "find_dataset_common_path")
 # so the quiet flag cannot suppress it. We already turn any failure on this path
 # into our own one-line stderr message (and a clean doctor "[--]" line), so that
 # traceback is pure noise. Silence dtcli's own loggers around each call.
-_DTCLI_LOGGERS = ("config", "functions")
+_DTCLI_LOGGERS = ("config", "functions", "dtcli")
 
 
 @contextlib.contextmanager
 def _quiet_dtcli_logging():
-    """Mute datatrail-cli's internal loggers for the duration of a call, then
-    restore their levels. Scoped to dtcli's own loggers, so nothing else is
-    affected."""
-    saved = [(lg := logging.getLogger(n), lg.level) for n in _DTCLI_LOGGERS]
+    """Mute datatrail-cli's internal loggers for the duration of a call.
+
+    Level alone cannot do this: every dtcli function begins with
+    utilities.set_log_level(logger, verbose, quiet), which under quiet=True
+    re-arms its own logger to ERROR *inside the call* -- so a pre-set
+    CRITICAL+1 is overwritten and dtcli's ERROR records (e.g. 'Service not
+    responding.') still hit the root RichHandler, duplicating the one-line
+    message our adapter already prints. Blocking propagation (and any
+    directly-attached handlers) is outage-proof because set_log_level only
+    touches the level. Everything is restored on exit; scoped to dtcli's own
+    loggers, so nothing else is affected.
+    """
+    saved = []
+    for n in _DTCLI_LOGGERS:
+        lg = logging.getLogger(n)
+        saved.append((lg, lg.level, lg.propagate, list(lg.handlers)))
+        lg.setLevel(logging.CRITICAL + 1)
+        lg.propagate = False
+        lg.handlers = []
     try:
-        for lg, _ in saved:
-            lg.setLevel(logging.CRITICAL + 1)
         yield
     finally:
-        for lg, level in saved:
+        for lg, level, propagate, handlers in saved:
             lg.setLevel(level)
+            lg.propagate = propagate
+            lg.handlers = handlers
 
 
 def _functions():
@@ -126,31 +141,53 @@ class Datatrail:
 
     # -- discovery (listing), via functions.list(...) ----------------------
     @staticmethod
-    def _list_result(scope=None, dataset=None) -> dict:
-        """functions.list(...) -> dict, with any datatrail-reported error turned
-        into {} at the call site (logged to stderr, never raised)."""
+    def _list_result_checked(scope=None, dataset=None) -> "tuple[dict, bool]":
+        """functions.list(...) -> (dict, ok).
+
+        ok=False means the SERVICE could not answer (exception, or datatrail's
+        own {"error": ...}); the dict is then {}. ok=True with an empty dict is
+        a genuine "nothing registered here". The distinction exists because a
+        discovery walk must never let an outage read as emptiness -- the
+        unchecked helpers below collapse both to [] for callers whose contract
+        already says "treat [] as couldn't-determine"."""
         try:
             with _quiet_dtcli_logging():
                 res = _functions().list(scope, dataset, quiet=True)
         except Exception as exc:
             sys.stderr.write(f"[datatrail list scope={scope} dataset={dataset}] "
                              f"{type(exc).__name__}: {exc}\n")
-            return {}
+            return {}, False
         if not isinstance(res, dict):
-            return {}
+            return {}, False
         if res.get("error"):
             sys.stderr.write(f"[datatrail list scope={scope} dataset={dataset}] "
                              f"{res['error']}\n")
-            return {}
+            return {}, False
+        return res, True
+
+    @classmethod
+    def _list_result(cls, scope=None, dataset=None) -> dict:
+        res, _ok = cls._list_result_checked(scope, dataset)
         return res
 
     def list_scopes(self) -> List[str]:
         """Every scope datatrail can see (functions.list with no scope)."""
-        return list(self._list_result().get("scopes", []))
+        return self.list_scopes_checked()[0]
+
+    def list_scopes_checked(self) -> "tuple[List[str], bool]":
+        """(scopes, ok): ok=False = datatrail did not answer, not "no scopes"."""
+        res, ok = self._list_result_checked()
+        return list(res.get("scopes", [])), ok
 
     def list_datasets(self, scope: str) -> List[str]:
         """The larger-datasets registered under one scope."""
-        return list(self._list_result(scope).get("larger_datasets", []))
+        return self.list_datasets_checked(scope)[0]
+
+    def list_datasets_checked(self, scope: str) -> "tuple[List[str], bool]":
+        """(datasets, ok): ok=False = the scope could not be LISTED (outage),
+        which is not the same map row as a scope with nothing under it."""
+        res, ok = self._list_result_checked(scope)
+        return list(res.get("larger_datasets", [])), ok
 
     def children(self, scope: str, dataset: str) -> List[str]:
         """The child dataset names one level under (scope, dataset), verbatim.
@@ -162,8 +199,15 @@ class Datatrail:
         Degrades to [] like the other listing methods: treat that as "couldn't
         determine", never "definitively empty".
         """
-        return [str(n) for n in
-                self._list_result(scope, dataset).get("datasets", [])]
+        return self.children_checked(scope, dataset)[0]
+
+    def children_checked(self, scope: str,
+                         dataset: str) -> "tuple[List[str], bool]":
+        """(children, ok): the checked form of children() -- recon's --expand
+        uses it so an unlistable container is reported as such, not written to
+        the map as if it were childless."""
+        res, ok = self._list_result_checked(scope, dataset)
+        return [str(n) for n in res.get("datasets", [])], ok
 
     def events_in_dataset(self, scope: str, dataset: str) -> List[str]:
         """Event IDs under one larger-dataset (extracted from child names)."""
