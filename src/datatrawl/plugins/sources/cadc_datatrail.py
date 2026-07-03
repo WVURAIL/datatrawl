@@ -139,11 +139,20 @@ def _keep(text: str, terms: List[str]) -> bool:
 
 
 def _recon(named_scopes, match_terms: List[str], out_dir: str,
-           expand: bool = False) -> str:
+           expand: bool = False, telescope=None) -> str:
     """Recursive `datatrail ls`: list the datasets under each scope, with NO
     event/file enumeration -- the cross-scope survey-of-the-landscape datatrail
     itself can't do in one call. Writes scopes.jsonl and prints a readable map.
-    `named_scopes=None` walks every scope datatrail sees.
+
+    Scope resolution, in precedence order: explicit `named_scopes` (--scope)
+    are walked verbatim; else `telescope` keeps the live scopes whose FIRST
+    component is that telescope (gbo -> gbo.event.baseband.raw,
+    gbo.acquisition.processed, ...); else every scope datatrail sees.
+    The telescope filter deliberately selects from datatrail's live namespace,
+    NOT the instrument YAML's `scopes:` -- the YAML declares what the EVENT
+    survey walks, and discovery must see the telescope's whole namespace (the
+    gains that motivated this live in a scope no YAML declares). Filtering to
+    zero scopes is a loud error, never a silent empty map.
 
     Rows are {scope, dataset}. With `expand`, each kept dataset is opened ONE
     level and its rows become the children -- {scope, dataset: <child>,
@@ -161,8 +170,24 @@ def _recon(named_scopes, match_terms: List[str], out_dir: str,
     """
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
-    scopes = list(named_scopes) if named_scopes else DATATRAIL.list_scopes()
+    tel_note = ""
+    if named_scopes:
+        scopes = list(named_scopes)              # explicit --scope wins
+    else:
+        scopes = DATATRAIL.list_scopes()
+        if telescope:
+            tel, n_all = str(telescope).lower(), len(scopes)
+            scopes = [s for s in scopes
+                      if str(s).split(".")[0].lower() == tel]
+            if not scopes:
+                raise SystemExit(
+                    f"no datatrail scope has first component {telescope!r} "
+                    f"({n_all} scope(s) visible). Omit --telescope to walk "
+                    f"them all, or name scopes explicitly with --scope.")
+            tel_note = (f"; telescope={telescope} ({len(scopes)}/{n_all} "
+                        f"scope(s); omit --telescope to walk all)")
     print(f"[recon] listing datasets across {len(scopes)} scope(s)"
+          + tel_note
           + (f"; match={match_terms}" if match_terms else "")
           + ("; expanding matches one level" if expand else ""), flush=True)
 
@@ -456,7 +481,8 @@ class CadcDatatrailSource(DataSource):
                  if scope_opt else None)
         if o.get("scopes_only"):                 # recon: recursive `datatrail ls`
             return _recon(named, _match_terms(o.get("match")), out_dir,
-                          expand=bool(o.get("expand", False)))
+                          expand=bool(o.get("expand", False)),
+                          telescope=getattr(ctx.instrument, "name", None))
         inst_scopes = tuple(getattr(ctx.instrument, "scopes", ()) or ())
         scopes = named or inst_scopes or _DEFAULT_SCOPES
         n_ch = ctx.instrument.n_channels if ctx.instrument is not None else 0

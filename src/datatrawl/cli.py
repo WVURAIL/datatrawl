@@ -550,7 +550,23 @@ def _resolve_from_meta(args) -> None:
 
 
 def cmd_survey(args) -> int:
-    instrument, ctx = _make_ctx(args)
+    # --telescope is optional for recon (--scopes-only): omitting it walks
+    # EVERY scope datatrail can see (zero-knowledge discovery); naming it
+    # narrows the walk to that telescope's scopes. The event survey still
+    # requires it -- geometry, default scopes, and the inventory's home dir
+    # all come from the instrument.
+    if not getattr(args, "telescope", None):
+        if not getattr(args, "scopes_only", False):
+            print("error: --telescope is required to survey events (it sets "
+                  "the geometry, the default scopes, and where the inventory "
+                  "lands). Only recon (--scopes-only) runs without one.",
+                  file=sys.stderr)
+            return 2
+        instrument = None
+        ctx = RunContext(instrument=None, options={
+            k: v for k, v in _collect_options(args).items() if v is not None})
+    else:
+        instrument, ctx = _make_ctx(args)
     src = _require_plugin("source", args.source)()
     # The reader owns the archive file shape (Reader.survey_files) -- which
     # files one event contributes and what they are named -- so survey resolves
@@ -566,9 +582,9 @@ def cmd_survey(args) -> int:
     if reader_name and not getattr(args, "scopes_only", False):
         ctx.reader = _require_plugin("reader", reader_name)()
     if getattr(args, "scopes_only", False) and not args.out:
-        # the recon scope map spans telescopes (it lists every datatrail scope),
-        # so it is not telescope-specific -> data/scopes.jsonl, a level above the
-        # per-telescope inventory dirs.
+        # the recon scope map lands at data/scopes.jsonl, a level above the
+        # per-telescope inventory dirs: without --telescope it spans every
+        # telescope, and even narrowed it is a discovery map, not an inventory.
         out_dir = os.path.join(args.root, "data")
         name = None
     elif args.out:
@@ -582,7 +598,8 @@ def cmd_survey(args) -> int:
         name = getattr(args, "name", None) or derive_inventory_name(
             instrument.name, getattr(args, "freq_ids", None))
         out_dir = os.path.join(args.root, "data", name)
-    print(f"[survey] {instrument.name} via {args.source} -> {out_dir}")
+    print(f"[survey] {instrument.name if instrument else '(all scopes)'} "
+          f"via {args.source} -> {out_dir}")
     if args.dry_run:
         print("  dry-run: would survey")
         return 0
@@ -1034,8 +1051,12 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_survey = sub.add_parser("survey", parents=[common],
                               help="walk the archive to build an inventory for a source")
-    p_survey.add_argument("--telescope", required=True,
-                          help="telescope whose scopes to survey (e.g. chime)")
+    p_survey.add_argument("--telescope", default=None,
+                          help="telescope whose scopes to survey (e.g. chime). "
+                               "Required for an event survey; optional for recon "
+                               "(--scopes-only), where naming it narrows the walk "
+                               "to that telescope's scopes and omitting it walks "
+                               "every scope datatrail can see.")
     p_survey.add_argument("--source", default="cadc-datatrail",
                           help="source plugin to use (default: cadc-datatrail)")
     p_survey.add_argument("--root", default=os.getcwd(),
@@ -1074,8 +1095,9 @@ def build_parser() -> argparse.ArgumentParser:
     p_survey.add_argument("--scopes-only", action="store_true",
                           help="recon: list datasets across the scope(s) WITHOUT "
                                "enumerating events/files (a recursive `datatrail "
-                               "ls`). With no --scope, walks every scope datatrail "
-                               "can see. Writes scopes.jsonl.")
+                               "ls`). With no --scope, walks the telescope's "
+                               "scopes -- or every scope datatrail can see when "
+                               "--telescope is also omitted. Writes scopes.jsonl.")
     p_survey.add_argument("--match", default=None,
                           help="recon filter: comma-separated substrings; keep only "
                                "scope/dataset names containing ALL of them "

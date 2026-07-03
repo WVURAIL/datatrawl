@@ -32,6 +32,18 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
   containers keep their own row. The `Datatrail` adapter grew `children()`
   (the raw list `events_in_dataset` already extracted from).
 
+### Changed (survey CLI)
+
+- `--telescope` on `survey` now narrows recon (`--scopes-only`) to that
+  telescope's scopes -- selected from datatrail's LIVE namespace by first
+  component, deliberately not from the YAML `scopes:` list, which declares
+  only what the event survey walks (the gains that motivated this live in a
+  scope no YAML declares). It is now optional: omitting it walks every scope
+  datatrail can see (zero-knowledge discovery); the event survey still
+  requires it, with an actionable error. Explicit `--scope` always wins, and
+  a telescope matching zero scopes is a loud error naming the escape hatch,
+  never a silent empty map.
+
 ### Fixed
 
 - Malformed freq_id selections (`'foo'`, `'506-844-900'`, a bad list element,

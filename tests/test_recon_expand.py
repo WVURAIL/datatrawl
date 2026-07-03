@@ -143,5 +143,62 @@ def test_cli_plumbs_expand(tmp_path):
     assert any(r.get("parent") == "complex_gains" for r in rows)
 
 
+# --------------------------------------------------------------------------
+# --telescope on recon: narrows to that telescope's LIVE scopes (first
+# component), never to the YAML scopes -- and stays optional for discovery
+# --------------------------------------------------------------------------
+class _Tel:
+    def __init__(self, name):
+        self.name = name
+
+
+def test_telescope_narrows_recon_to_its_live_scopes(tmp_path):
+    ctx = RunContext(instrument=_Tel("gbo"), selection=None,
+                     options={"scopes_only": True, "expand": True})
+    buf = io.StringIO()
+    with fake_landscape(), contextlib.redirect_stdout(buf):
+        path = cadc_datatrail.CadcDatatrailSource().survey(ctx, str(tmp_path))
+    rows = [json.loads(l) for l in open(path) if l.strip()]
+    # BOTH gbo scopes kept -- including the acquisition scope the gbo YAML
+    # does not declare (the discovery case that motivates live-namespace
+    # filtering) -- and nothing from kko/chime
+    assert {r["scope"] for r in rows} == {GBO_ACQ, GBO_EVT}
+    assert any(r.get("parent") == "complex_gains" for r in rows)
+    assert "omit --telescope to walk all" in buf.getvalue()   # the hatch, visible
+
+
+def test_explicit_scope_wins_over_telescope(tmp_path):
+    ctx = RunContext(instrument=_Tel("gbo"), selection=None,
+                     options={"scopes_only": True, "scope": KKO_ACQ,
+                              "expand": False})
+    with fake_landscape(), contextlib.redirect_stdout(io.StringIO()):
+        path = cadc_datatrail.CadcDatatrailSource().survey(ctx, str(tmp_path))
+    rows = [json.loads(l) for l in open(path) if l.strip()]
+    assert {r["scope"] for r in rows} == {KKO_ACQ}
+
+
+def test_zero_matching_telescope_is_loud(tmp_path):
+    ctx = RunContext(instrument=_Tel("dra"), selection=None,   # no dra.* scopes
+                     options={"scopes_only": True})
+    with fake_landscape(), pytest.raises(SystemExit) as ei:
+        cadc_datatrail.CadcDatatrailSource().survey(ctx, str(tmp_path))
+    assert "omit --telescope" in str(ei.value).lower()      # never a silent empty map
+
+
+def test_recon_runs_without_telescope_event_survey_does_not(tmp_path):
+    with fake_landscape(), contextlib.redirect_stdout(io.StringIO()):
+        rc = cli.main(["survey", "--scopes-only", "--match", "gain",
+                       "--root", str(tmp_path)])
+    assert rc == 0
+    rows = [json.loads(l) for l in
+            open(os.path.join(str(tmp_path), "data", "scopes.jsonl"))]
+    assert {r["scope"] for r in rows} >= {GBO_ACQ, KKO_ACQ}    # all telescopes
+    # the event survey still requires the telescope, with an actionable error
+    err = io.StringIO()
+    with contextlib.redirect_stderr(err):
+        rc = cli.main(["survey", "--root", str(tmp_path)])
+    assert rc == 2 and "--telescope is required" in err.getvalue()
+
+
 if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__, "-q"]))
