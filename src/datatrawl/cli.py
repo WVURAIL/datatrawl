@@ -401,6 +401,7 @@ def _collect_options(args) -> dict:
         "re_enumerate": getattr(args, "re_enumerate", False),
         "scopes_only": getattr(args, "scopes_only", False),
         "match": getattr(args, "match", None),
+        "expand": getattr(args, "expand", False),
         "max_inspect": getattr(args, "max_inspect", None),
     }
     # Analyzer-specific parameters travel through ctx.options, set generically with
@@ -557,6 +558,9 @@ def cmd_survey(args) -> int:
     # the telescope's canonical reader is the default (the same resolution
     # `scan` records in the meta sidecar). Recon (--scopes-only) lists names
     # only and needs no shape. An external shape reader loads with --plugin.
+    if getattr(args, "expand", False) and not getattr(args, "scopes_only", False):
+        print("note: --expand only applies to --scopes-only recon; ignored for "
+              "an event survey.", file=sys.stderr)
     reader_name = (getattr(args, "reader", None)
                    or getattr(instrument, "reader", "") or None)
     if reader_name and not getattr(args, "scopes_only", False):
@@ -1076,6 +1080,13 @@ def build_parser() -> argparse.ArgumentParser:
                           help="recon filter: comma-separated substrings; keep only "
                                "scope/dataset names containing ALL of them "
                                "(case-insensitive).")
+    p_survey.add_argument("--expand", action="store_true",
+                          help="recon (--scopes-only) only: open each kept dataset "
+                               "one level and write its CHILDREN to scopes.jsonl "
+                               "(rows gain a `parent` field), so every row is "
+                               "directly resolvable with `datatrail ps`. This is "
+                               "how a container hit like complex_gains becomes "
+                               "its timestamped acquisitions.")
     p_survey.add_argument("--set", dest="set_opts", action="append", metavar="KEY=VALUE",
                           help="source-specific parameter passed via ctx.options "
                                "(repeatable), for a custom source's survey(), e.g. "

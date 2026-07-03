@@ -152,10 +152,23 @@ class Datatrail:
         """The larger-datasets registered under one scope."""
         return list(self._list_result(scope).get("larger_datasets", []))
 
+    def children(self, scope: str, dataset: str) -> List[str]:
+        """The child dataset names one level under (scope, dataset), verbatim.
+
+        This is the raw name list `events_in_dataset` extracts event IDs from.
+        Recon's --expand writes it out unfiltered, because non-event products
+        (timestamped acquisitions, calibration containers) have no event ID to
+        extract -- their names ARE the handle you resolve with `datatrail ps`.
+        Degrades to [] like the other listing methods: treat that as "couldn't
+        determine", never "definitively empty".
+        """
+        return [str(n) for n in
+                self._list_result(scope, dataset).get("datasets", [])]
+
     def events_in_dataset(self, scope: str, dataset: str) -> List[str]:
         """Event IDs under one larger-dataset (extracted from child names)."""
-        children = self._list_result(scope, dataset).get("datasets", [])
-        return [ev for name in children for ev in _EVENT_RE.findall(str(name))]
+        return [ev for name in self.children(scope, dataset)
+                for ev in _EVENT_RE.findall(name)]
 
     # -- common-path resolution --------------------------------------------
     def common_path(self, scope: str, event: str, *, retries: int = 3,

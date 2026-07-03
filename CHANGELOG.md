@@ -25,6 +25,12 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
   enabling inventories of non-baseband products via an external shape reader
   (`docs/ADDING_A_READER.md`).
 - "Scope and non-goals" section in the README.
+- Recon `--expand` (`survey --scopes-only`): opens each kept dataset one
+  level and writes its children to `scopes.jsonl` (rows gain a `parent`
+  field), so a container hit like `complex_gains` yields its timestamped
+  acquisitions, each directly resolvable with `datatrail ps`. Childless
+  containers keep their own row. The `Datatrail` adapter grew `children()`
+  (the raw list `events_in_dataset` already extracted from).
 
 ### Fixed
 
@@ -33,6 +39,9 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
   `SystemExit`s naming the grammar, instead of `int()` tracebacks. A reversed
   range (`'844-506'`), which used to parse to an empty set and therefore
   select *everything*, is now a loud error.
+- Recon's closing message no longer tells the user to re-run survey against
+  a non-event container (which survey's event walk cannot see); it now names
+  the correct next step for each case (`--expand` / a shape reader).
 
 ### Changed
 

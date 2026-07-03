@@ -138,11 +138,22 @@ def _keep(text: str, terms: List[str]) -> bool:
     return all(t in low for t in terms)
 
 
-def _recon(named_scopes, match_terms: List[str], out_dir: str) -> str:
+def _recon(named_scopes, match_terms: List[str], out_dir: str,
+           expand: bool = False) -> str:
     """Recursive `datatrail ls`: list the datasets under each scope, with NO
     event/file enumeration -- the cross-scope survey-of-the-landscape datatrail
-    itself can't do in one call. Writes scopes.jsonl ({scope, dataset}) and
-    prints a readable map. `named_scopes=None` walks every scope datatrail sees.
+    itself can't do in one call. Writes scopes.jsonl and prints a readable map.
+    `named_scopes=None` walks every scope datatrail sees.
+
+    Rows are {scope, dataset}. With `expand`, each kept dataset is opened ONE
+    level and its rows become the children -- {scope, dataset: <child>,
+    parent: <container>} -- so every row is directly resolvable with
+    `datatrail ps <scope> <dataset> -s`. That is the difference between finding
+    a container (a --match hit like `complex_gains`) and having the timestamped
+    acquisitions inside it in hand. A dataset that yields no children keeps its
+    own row: it may be file-bearing, genuinely empty, or unreadable right now
+    (the adapter's [] covers all three), so nothing found is ever dropped from
+    the map.
 
     Filtering is name-level only (instrument / type / format as they appear in
     the scope & dataset names); deeper criteria like validity or exact frequency
@@ -152,10 +163,12 @@ def _recon(named_scopes, match_terms: List[str], out_dir: str) -> str:
     out.mkdir(parents=True, exist_ok=True)
     scopes = list(named_scopes) if named_scopes else DATATRAIL.list_scopes()
     print(f"[recon] listing datasets across {len(scopes)} scope(s)"
-          + (f"; match={match_terms}" if match_terms else ""), flush=True)
+          + (f"; match={match_terms}" if match_terms else "")
+          + ("; expanding matches one level" if expand else ""), flush=True)
 
     map_path = out / "scopes.jsonl"
-    rows = 0
+    rows = n_expanded = 0
+    cap = 20                        # child names printed per dataset; file gets all
     with open(map_path, "w") as fh:
         for i, s in enumerate(scopes, 1):
             datasets = DATATRAIL.list_datasets(s)
@@ -166,13 +179,41 @@ def _recon(named_scopes, match_terms: List[str], out_dir: str) -> str:
             print(f"  [{i:>3}/{len(scopes)}] {s}  ({len(kept)} dataset(s))",
                   flush=True)
             for d in kept:
-                print(f"        {d}")
-                fh.write(json.dumps({"scope": s, "dataset": d}) + "\n")
-                rows += 1
+                children = DATATRAIL.children(s, d) if expand else []
+                if children:
+                    print(f"        {d}  ({len(children)} child(ren))")
+                    for c in children[:cap]:
+                        print(f"            {c}")
+                    if len(children) > cap:
+                        print(f"            ... and {len(children) - cap} more "
+                              f"(all in scopes.jsonl)")
+                    for c in children:
+                        fh.write(json.dumps({"scope": s, "dataset": c,
+                                             "parent": d}) + "\n")
+                        rows += 1
+                    n_expanded += 1
+                else:
+                    print(f"        {d}"
+                          + ("  (no children listed)" if expand else ""))
+                    fh.write(json.dumps({"scope": s, "dataset": d}) + "\n")
+                    rows += 1
 
-    print(f"\n[recon] wrote {map_path}: {rows} (scope, dataset) rows. This is a "
-          f"discovery map, not the scan inventory -- pick the scope(s) you want "
-          f"and re-run survey without --scopes-only.", flush=True)
+    tail = (
+        "Every row resolves directly: `datatrail ps <scope> <dataset> -s`. "
+        "Event-keyed scopes are then surveyed by re-running without "
+        "--scopes-only; non-event products (timestamped acquisitions, "
+        "calibration) need a per-product shape reader or a hand-written "
+        "inventory -- survey's event walk will not see them."
+        if expand else
+        "For event-keyed data, pick the scope(s) you want and re-run survey "
+        "without --scopes-only. A hit that is a CONTAINER of non-event "
+        "children (timestamped acquisitions such as complex_gains) will NOT "
+        "be walked by survey's event enumeration -- re-run this recon with "
+        "--expand to list its children here.")
+    print(f"\n[recon] wrote {map_path}: {rows} rows"
+          + (f" ({n_expanded} dataset(s) expanded)" if expand else "")
+          + f". This is a discovery map, not the scan inventory. {tail}",
+          flush=True)
     return str(map_path)
 
 
@@ -414,7 +455,8 @@ class CadcDatatrailSource(DataSource):
                        if str(s).strip())
                  if scope_opt else None)
         if o.get("scopes_only"):                 # recon: recursive `datatrail ls`
-            return _recon(named, _match_terms(o.get("match")), out_dir)
+            return _recon(named, _match_terms(o.get("match")), out_dir,
+                          expand=bool(o.get("expand", False)))
         inst_scopes = tuple(getattr(ctx.instrument, "scopes", ()) or ())
         scopes = named or inst_scopes or _DEFAULT_SCOPES
         n_ch = ctx.instrument.n_channels if ctx.instrument is not None else 0

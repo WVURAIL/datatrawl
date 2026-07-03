@@ -72,7 +72,9 @@ class GainsReader(Reader):
 ```
 
 Then survey with it (`--plugin` loads an external module; `--scope` names where the
-product lives in Datatrail -- recon with `--scopes-only --match <term>` finds that):
+product lives in Datatrail -- recon with `--scopes-only --match <term>` finds that, and
+`--expand` opens a container hit one level so `scopes.jsonl` lists the actual product
+datasets, e.g. the timestamped acquisitions under `complex_gains`):
 
 ```bash
 datatrawl survey --telescope chime --reader chime-gains \
