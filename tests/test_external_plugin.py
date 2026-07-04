@@ -3,7 +3,7 @@
 External-plugin discovery test.
 
 Proves an analyzer that lives OUTSIDE src/datatrawl/ (here
-examples/external_analyzer.py) is:
+tests/external_analyzer_fixture.py) is:
   * NOT visible as a built-in (a plain scan can't find it),
   * fully usable once loaded via `--plugin <path>` OR the DATATRAWL_PLUGINS env
     var, running through the real engine and honouring a `--set` parameter, and
@@ -29,7 +29,7 @@ from datatrawl import instruments as inst_mod
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SRC = os.path.join(ROOT, "src")
-PLUGIN = os.path.join(ROOT, "examples", "external_analyzer.py")
+PLUGIN = os.path.join(ROOT, "tests", "external_analyzer_fixture.py")
 F_TONE_BB = 12000.0
 DF_HZ = FS / NFFT
 FREQ_ID = 844

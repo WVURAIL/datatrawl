@@ -1,30 +1,20 @@
 """
-Worked external-analyzer example.
+Analyzer fixture for the external-plugin discovery tests.
 
-This analyzer lives outside `src/datatrawl/`, the way a user's own analysis
-would. `tests/test_external_plugin.py` loads it to prove the external-plugin
-path works; it also serves as the concrete reference for
-`docs/ADDING_AN_ANALYZER.md`.
+`tests/test_external_plugin.py` loads this file via `--plugin <path>` and the
+DATATRAWL_PLUGINS env var to prove datatrawl's external-plugin machinery: an
+analyzer living outside `src/datatrawl/` is invisible until loaded, first-class
+once loaded (list/doctor/scan through the full engine), honours a `--set`
+parameter from `ctx.options` (here: `--set dc_mask_hz=...`), and is strict
+about resume compatibility when that parameter or an engine-level invariant
+changes.
 
-It is loaded into datatrawl at runtime via any of:
+This file is test scaffolding, kept out of pytest collection by its name. The
+user-facing starting point for writing your own analyzer is the template
+repository, which ships this same analyzer as an installable package whose
+entry point makes it discoverable with no `--plugin` flag:
 
-    datatrawl scan --plugin /path/to/your_analyzer.py ...                   # path
-    datatrawl scan --plugin mypkg.your_analyzer ...                         # module
-    DATATRAWL_PLUGINS=/path/to/your_analyzer.py datatrawl ...               # env
-    # or an entry point in your package's pyproject.toml:
-    #   [project.entry-points."datatrawl.plugins"]
-    #   freq_id-peak = "mypkg.your_analyzer"
-
-Once loaded, `@analyzer` registers it and it is first-class: it shows up in
-`datatrawl list analyzers` / `doctor` and runs through the full engine
-(per-freq_id fan-out, dedup, quarantine, self-heal/resume, checkpointing) exactly
-like a built-in. This is how you keep your science in your own repo while still
-using the shared tool's machinery -- a real analysis such as an F-statistic
-detector follows the same shape.
-
-It also shows reading an analyzer-specific parameter from `ctx.options`, set on
-the command line with `--set key=value` (here: `--set dc_mask_hz=...`), and
-rejecting a resume when that parameter or an engine-level invariant changes.
+    https://github.com/WVURAIL/datatrawl-analyzer-template
 """
 from __future__ import annotations
 

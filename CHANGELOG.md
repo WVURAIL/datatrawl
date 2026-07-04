@@ -29,6 +29,17 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
   documenting the `--set key=value` -> `ctx.options` path: value typing rules,
   the shared namespace with engine-resolved keys, and when a `--set` option is
   a resume parameter.
+- The worked external analyzer moved to its own template repository,
+  [`WVURAIL/datatrawl-analyzer-template`](https://github.com/WVURAIL/datatrawl-analyzer-template):
+  an installable "Use this template" project that ships `freq_id-peak` behind a
+  `datatrawl.plugins` entry point, pinned to `datatrawl v0.2.0`, with a smoke
+  suite that runs the real engine on synthetic data -- the packaging and
+  entry-point path an in-repo example file could never demonstrate.
+  `examples/external_analyzer.py` became `tests/external_analyzer_fixture.py`
+  (the plugin-discovery tests still need an out-of-tree analyzer file), the
+  README "Quick path" now leads with the template, and a new `template-smoke`
+  CI job runs the template's suite against the datatrawl checkout under test,
+  so a datatrawl change that breaks the template fails on the datatrawl side.
 
 ## [0.2.0] - 2026-07-03
 

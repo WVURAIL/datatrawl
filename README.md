@@ -347,92 +347,23 @@ Two realistic examples:
 
 ### Quick path: using datatrawl from your own project
 
-Most project-specific baseband work only needs a new analyzer. A typical
-external project can look like this:
+Most project-specific baseband work only needs a new analyzer, and the fastest
+start is the template repository:
+[**WVURAIL/datatrawl-analyzer-template**](https://github.com/WVURAIL/datatrawl-analyzer-template).
+Click "Use this template", rename per its checklist, and `pip install -e .` --
+the entry point in its `pyproject.toml` makes your analyzer appear in
+`datatrawl list analyzers` with no `--plugin` flag. The template ships a
+complete working analyzer (`freq_id-peak`: averaged PSD + peak bin, with
+`--set` handling and strict resume validation) and a smoke test that runs the
+real engine on synthetic data, so `pytest -q` proves the integration before
+any archive access.
 
-```text
-my_project/
-    pyproject.toml
-    my_project/
-        __init__.py
-        datatrawl_plugins/
-            __init__.py
-            my_analyzer.py
-```
-
-A self-contained analyzer can be loaded directly by file path:
-
-```bash
-datatrawl list analyzers \
-  --plugin /path/to/my_project/my_project/datatrawl_plugins/my_analyzer.py
-```
-
-A file loaded this way is standalone and cannot use package-relative imports. If
-the analyzer imports sibling modules or shared helpers, install the project and
-load the analyzer by dotted module name instead:
-
-```bash
-pip install -e /path/to/my_project
-datatrawl list analyzers \
-  --plugin my_project.datatrawl_plugins.my_analyzer
-```
-
-Then run a readiness check for the concrete pipeline:
-
-```bash
-datatrawl doctor \
-  --plugin /path/to/my_project/my_project/datatrawl_plugins/my_analyzer.py \
-  --telescope <telescope> \
-  --source cadc-datatrail \
-  --reader chime-baseband \
-  --analyzer my-analyzer
-```
-
-After you have surveyed an inventory, run a one-file smoke test before scaling
-up. Keep its bounded product separate from the full run:
-
-```bash
-datatrawl scan \
-  --name <survey-name> \
-  --plugin /path/to/my_project/my_project/datatrawl_plugins/my_analyzer.py \
-  --analyzer my-analyzer \
-  --select <freq_id> \
-  --max-files 1 \
-  --max-frames-per-file 1 \
-  --out smoke/my-analyzer-<freq_id>.npz
-```
-
-Run the identical command a second time. It should report that there is nothing
-to do and should not duplicate output. For a partial-resume test, run a larger
-bounded scan, interrupt it after a checkpoint, and rerun the same command. Use a
-fresh output path for the later uncapped analysis.
-
-Once the project is packaged, expose the plugin through an entry point in your
-project's `pyproject.toml`:
-
-```toml
-[project.entry-points."datatrawl.plugins"]
-my-analyzer = "my_project.datatrawl_plugins.my_analyzer"
-```
-
-Install or reinstall the project so the entry-point metadata is available:
-
-```bash
-pip install -e /path/to/my_project
-```
-
-After that, `datatrawl` can discover the plugin without `--plugin`:
-
-```bash
-datatrawl list analyzers
-datatrawl scan --name <survey-name> --analyzer my-analyzer --select <freq_id>
-```
-
-For a concrete external analyzer reference, see
-[`examples/external_analyzer.py`](examples/external_analyzer.py).
-
-It lives outside `src/datatrawl/` and is loaded the same way a user project would
-load its own analyzer.
+For ad-hoc loading without packaging, `--plugin` takes either a path to a
+standalone `.py` file (which cannot use package-relative imports) or a dotted
+module name from an installed project; `DATATRAWL_PLUGINS` does the same from
+the environment. The loading mechanics, the preflight checklist (doctor, a
+one-file smoke scan, rerun to verify resume), and the full contract live in
+[`docs/ADDING_AN_ANALYZER.md`](docs/ADDING_AN_ANALYZER.md).
 
 ### Minimal analyzer shape
 
