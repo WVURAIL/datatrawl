@@ -333,6 +333,12 @@ helpers), make the package importable (`pip install -e .`, or put its root on
 `PYTHONPATH`) and load it by module name (`--plugin my_project.my_analyzer`) or via
 the entry point above.
 
+The packaged form is available ready-made: the template repository
+[`WVURAIL/datatrawl-analyzer-template`](https://github.com/WVURAIL/datatrawl-analyzer-template)
+ships the src layout, the declared entry point, and a smoke suite that runs the
+real engine on synthetic data. "Use this template", rename per its checklist,
+`pip install -e .`, and the analyzer is discoverable with no `--plugin` flag.
+
 ## Preflight checklist
 
 Before archive scale, keep the bounded smoke-test product separate from the full run:

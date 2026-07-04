@@ -398,6 +398,7 @@ inputs are in [`docs/ADDING_AN_ANALYZER.md`](docs/ADDING_AN_ANALYZER.md).
 | Guide | Purpose |
 |---|---|
 | [`docs/ADDING_AN_ANALYZER.md`](docs/ADDING_AN_ANALYZER.md) | Add the science plugin. This is the common case. |
+| [`WVURAIL/datatrawl-analyzer-template`](https://github.com/WVURAIL/datatrawl-analyzer-template) | Start your own analyzer project: installable, entry-point-discovered, tested against the engine. |
 | [`docs/ADDING_A_SOURCE.md`](docs/ADDING_A_SOURCE.md) | Add data from a new location, scope layout, or filesystem convention. |
 | [`docs/ADDING_A_READER.md`](docs/ADDING_A_READER.md) | Add support for a new file format. |
 | [`docs/ADDING_A_TELESCOPE.md`](docs/ADDING_A_TELESCOPE.md) | Add a new instrument geometry YAML. |
