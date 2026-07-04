@@ -207,6 +207,33 @@ works unchanged against archive and local sources. The runnable reference for
 both is [`examples/per_event_companions.py`](../examples/per_event_companions.py),
 driven end to end through the CLI by `tests/test_per_event_scan.py`.
 
+## Run parameters (`--set`)
+
+Analyzer parameters travel through `ctx.options`. On the command line they are
+set generically, so the CLI stays analysis-agnostic:
+
+```bash
+datatrawl scan ... --analyzer my-analyzer --set bracket_hz=400 --set window=hann
+```
+
+The mechanics:
+
+- `--set key=value` is repeatable and exists on all four run-facing commands
+  (`doctor`, `survey`, `explore`, `scan`). Sources read the same dict, which is
+  how a custom source takes its own settings
+  (see [`ADDING_A_SOURCE.md`](ADDING_A_SOURCE.md)).
+- Values get best-effort typing before they reach the analyzer: `true`/`false`
+  become bools, integers and floats are parsed, `none`/`null` drops the key,
+  and anything else stays a string. Validate and coerce in the analyzer rather
+  than assuming a type survived the command line.
+- `ctx.options` is one shared namespace. The engine resolves its own keys into
+  it first (`inventory`, `root`, `source_root`, `gpu`, ...), and `--set` pairs
+  merge last. Pick distinctive parameter names and read them with
+  `ctx.options.get("my_key", default)`.
+- A `--set` parameter that changes the meaning of the product is a resume
+  parameter: stamp it into the product and check it in `resume()` -- see
+  [Validate resume parameters](#validate-resume-parameters) above.
+
 ## Auxiliary inputs (gains, flags, companions)
 
 Some analyses need a small companion file per unit -- calibration gains to

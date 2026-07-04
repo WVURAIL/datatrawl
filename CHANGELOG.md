@@ -17,6 +17,18 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
   cross-references the datatrawl mechanisms that consume each side of the
   datatrail hierarchy (recon `--expand` for the `ls` view, `files()` for the
   `ps -s` view).
+- README restructured from an outside-user review: the action path (install ->
+  verify -> worked example -> local files -> commands) now precedes
+  scope/non-goals, a contents line was added, "storage-safe" and "resumable"
+  are defined at first use, and the intended audience is stated. The
+  duplicated minimal-analyzer example, the Datatrail primer, and the
+  upstream-note blockquote were cut to teasers pointing at their canonical
+  homes (`docs/ADDING_AN_ANALYZER.md`, `docs/DATATRAIL_BOUNDARY.md`, the
+  `UPSTREAM NOTE` in `_datatrail.py`).
+- `docs/ADDING_AN_ANALYZER.md`: new "Run parameters (`--set`)" section
+  documenting the `--set key=value` -> `ctx.options` path: value typing rules,
+  the shared namespace with engine-resolved keys, and when a `--set` option is
+  a resume parameter.
 
 ## [0.2.0] - 2026-07-03
 
