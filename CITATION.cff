@@ -2,7 +2,7 @@ cff-version: 1.2.0
 message: "If you use datatrawl in research, please cite the software using this metadata."
 title: "datatrawl"
 type: software
-version: 0.2.0
+version: 1.0.0
 date-released: 2026-07-03
 authors:
   - family-names: "Gormley"

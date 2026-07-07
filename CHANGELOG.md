@@ -5,7 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.0.0] - 2026-07-03
+
+First stable release. The engine is functionally identical to v0.2.0; this
+release attaches the stability contract: the public surface -- the CLI, the
+analyzer / reader / source / instrument plugin contracts, and the product and
+inventory formats -- now changes only with a major version. The documented
+exception is the `dtcli.src.functions` internal-module dependency inside the
+`cadc-datatrail` source, which is upstream's surface rather than datatrawl's;
+its planned replacement is the `UPSTREAM NOTE` in `_datatrail.py`.
 
 ### Changed
 
@@ -40,6 +48,8 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
   README "Quick path" now leads with the template, and a new `template-smoke`
   CI job runs the template's suite against the datatrawl checkout under test,
   so a datatrawl change that breaks the template fails on the datatrawl side.
+- DS001/UG001 rolled to v1.2: version designation for the 1.0.0 tag; no
+  engine changes documented.
 
 ## [0.2.0] - 2026-07-03
 

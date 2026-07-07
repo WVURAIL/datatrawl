@@ -80,9 +80,9 @@
 \pagestyle{fancy}
 \fancyhf{}
 \fancyhead[L]{\small Datatrawl-UG001}
-\fancyhead[C]{\small Storage-Safe Archive Trawling Engine v0.2.0}
+\fancyhead[C]{\small Storage-Safe Archive Trawling Engine v1.0.0}
 \fancyhead[R]{\small User Guide}
-\fancyfoot[L]{\small Datatrawl-UG001 v1.1}
+\fancyfoot[L]{\small Datatrawl-UG001 v1.2}
 \fancyfoot[C]{\small West Virginia University}
 \fancyfoot[R]{\small Page \thepage\ of \pageref{LastPage}}
 \renewcommand{\headrulewidth}{0.8pt}
@@ -90,16 +90,16 @@
 \renewcommand{\footrulewidth}{0.8pt}
 \renewcommand{\footrule}{\hbox to\headwidth{\color{TrawlAmber}\leaders\hrule height \footrulewidth\hfill}}
 
-\title{datatrawl Storage-Safe Archive Trawling Engine v0.2.0\\User Guide}
+\title{datatrawl Storage-Safe Archive Trawling Engine v1.0.0\\User Guide}
 \author{West Virginia University}
-\date{Datatrawl-UG001 v1.1 \\ July 3, 2026}
+\date{Datatrawl-UG001 v1.2 \\ July 3, 2026}
 
 \begin{document}
 \thispagestyle{fancy}
 {\sffamily
 \begin{minipage}[t]{0.39\textwidth}
   {\fontsize{24}{26}\selectfont\bfseries\color{TrawlAmber}datatrawl}\par
-  {\small Datatrawl-UG001 v1.1, July 3, 2026}
+  {\small Datatrawl-UG001 v1.2, July 3, 2026}
 \end{minipage}%
 \begin{minipage}[t]{0.61\textwidth}
   \raggedleft
@@ -336,6 +336,10 @@ v1.1 & July 3, 2026 & Engine v0.2.0: recon (\code{--scopes-only} with
 \code{--match}/\code{--expand}/\code{--name}, telescope-scoped), event
 selection grammar, reader-owned archive file shape (\code{survey --reader}),
 \code{DATATRAIL.files()}, per-event fan-out and companion patterns. \\
+v1.2 & July 3, 2026 & Version designation: engine v0.2.0 re-tagged v1.0.0
+under the 1.0 stability contract (public CLI, plugin contracts,
+product/inventory formats); no functional changes. External analyzer example
+moved to the \code{datatrawl-analyzer-template} repository. \\
 \bottomrule
 \end{tabularx}
 

@@ -86,9 +86,9 @@
 \pagestyle{fancy}
 \fancyhf{}
 \fancyhead[L]{\small Datatrawl-DS001}
-\fancyhead[C]{\small Storage-Safe Archive Trawling Engine v0.2.0}
+\fancyhead[C]{\small Storage-Safe Archive Trawling Engine v1.0.0}
 \fancyhead[R]{\small Product Specification}
-\fancyfoot[L]{\small Datatrawl-DS001 v1.1}
+\fancyfoot[L]{\small Datatrawl-DS001 v1.2}
 \fancyfoot[C]{\small West Virginia University}
 \fancyfoot[R]{\small Page \thepage\ of \pageref{LastPage}}
 \renewcommand{\headrulewidth}{0.8pt}
@@ -96,16 +96,16 @@
 \renewcommand{\footrulewidth}{0.8pt}
 \renewcommand{\footrule}{\hbox to\headwidth{\color{TrawlAmber}\leaders\hrule height \footrulewidth\hfill}}
 
-\title{datatrawl Storage-Safe Archive Trawling Engine v0.2.0\\Product Specification}
+\title{datatrawl Storage-Safe Archive Trawling Engine v1.0.0\\Product Specification}
 \author{West Virginia University}
-\date{Datatrawl-DS001 v1.1 \\ July 3, 2026}
+\date{Datatrawl-DS001 v1.2 \\ July 3, 2026}
 
 \begin{document}
 \thispagestyle{fancy}
 {\sffamily
 \begin{minipage}[t]{0.39\textwidth}
   {\fontsize{24}{26}\selectfont\bfseries\color{TrawlAmber}datatrawl}\par
-  {\small Datatrawl-DS001 v1.1, July 3, 2026}
+  {\small Datatrawl-DS001 v1.2, July 3, 2026}
 \end{minipage}%
 \begin{minipage}[t]{0.61\textwidth}
   \raggedleft
@@ -118,7 +118,7 @@
 {\color{TrawlAmber}\hrule height 1.2pt}
 \vspace{8pt}
 
-{\small\color{TrawlGray}This product specification defines the v0.2.0 streaming
+{\small\color{TrawlGray}This product specification defines the v1.0.0 streaming
 engine contract. datatrawl is a downstream run layer: the archive authority
 (e.g.\ Datatrail/CADC) remains the source of record for what data exists;
 datatrawl fetches, streams, and deletes copies under a fixed storage budget.
@@ -375,6 +375,10 @@ v1.1 & July 3, 2026 & Engine v0.2.0: recon (\code{--scopes-only} with
 \code{--match}/\code{--expand}/\code{--name}, telescope-scoped), event
 selection grammar, reader-owned archive file shape (\code{survey --reader}),
 \code{DATATRAIL.files()}, per-event fan-out and companion patterns. \\
+v1.2 & July 3, 2026 & Version designation: engine v0.2.0 re-tagged v1.0.0
+under the 1.0 stability contract (public CLI, plugin contracts,
+product/inventory formats); no functional changes. External analyzer example
+moved to the \code{datatrawl-analyzer-template} repository. \\
 \bottomrule
 \end{tabularx}
 
