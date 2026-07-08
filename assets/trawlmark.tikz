@@ -1,0 +1,62 @@
+% Shared trawl-net mark for the datatrawl brand assets.
+%
+% \input this file after \usetikzlibrary{...}; it provides two pics:
+%   trawlmark  -- the full mark: ring, mesh, wake trails, incoming data
+%                 dots, and the caught (ringed) node
+%   trawlnet   -- ring + mesh only, inheriting the current draw color and
+%                 opacity (the ghost/decoration variant)
+% and the shared brand palette (cyA/cyB/cyC accents, ink, dim).
+%
+% Native coordinate frame: the 120x120 logo tile with y increasing DOWNWARD
+% -- place pics inside a picture using [x=1pt, y=-1pt]. Mesh, wake, and dot
+% tones are expressed with opacity rather than background color mixes, so
+% the mark renders consistently on any of the asset backgrounds.
+\definecolor{cyA}{HTML}{7df0e6}
+\definecolor{cyB}{HTML}{34b8e0}
+\definecolor{cyC}{HTML}{2bd4d4}
+\definecolor{ink}{HTML}{e6f3fb}
+\definecolor{dim}{HTML}{9fc2d6}
+
+% One macro holds the net geometry; both pics call it. (Do NOT nest pics:
+% transforms given as pic options reach the pic's own paths but not a
+% nested \pic's -- discovered the hard way with a half-scaled mark.)
+\newcommand{\trawlnetpaths}{%
+    \draw[line width=2.4pt] (55,60) circle (42pt);
+    \begin{scope}
+      \clip (55,60) circle (41pt);
+      \draw[line width=1.0pt, opacity=0.55]
+        (13,44) .. controls (40,58) and (70,58) .. (97,44)
+        (13,60) .. controls (40,74) and (70,74) .. (97,60)
+        (13,76) .. controls (40,90) and (70,90) .. (97,76)
+        (33,22) .. controls (43,55) and (43,65) .. (33,98)
+        (55,18) .. controls (63,55) and (63,65) .. (55,102)
+        (77,22) .. controls (83,55) and (83,65) .. (77,98);
+    \end{scope}%
+}
+
+\tikzset{
+  pics/trawlnet/.style={code={\trawlnetpaths}},
+  pics/trawlmark/.style={code={
+    % net (ring + mesh) in the accent blue
+    \begin{scope}[cyB]
+      \trawlnetpaths
+    \end{scope}
+    % wake trails behind the net
+    \draw[cyB, opacity=0.35, line width=1.1pt]
+      (58,112) .. controls (75,124) and (95,130) .. (120,132)
+      (50,122) .. controls (68,136) and (92,144) .. (118,148)
+      (62,132) .. controls (76,146) and (94,154) .. (112,158);
+    % incoming data dots drifting toward the mouth of the net
+    \fill[cyA]               (10,40) circle (2.0pt);
+    \fill[cyA, opacity=0.80] (14,52) circle (1.6pt);
+    \fill[cyA, opacity=0.65] ( 9,62) circle (1.4pt);
+    \fill[cyA]               (16,69) circle (2.1pt);
+    \fill[cyA, opacity=0.70] (12,79) circle (1.5pt);
+    \fill[cyA, opacity=0.60] (19,46) circle (1.2pt);
+    \fill[cyA, opacity=0.85] (21,60) circle (2.2pt);
+    \fill[cyA, opacity=0.50] ( 8,55) circle (1.0pt);
+    % the caught one, ringed
+    \draw[cyC, line width=1.4pt] (96,40) circle (3.6pt);
+    \fill[cyA]                   (96,40) circle (1.7pt);
+  }},
+}

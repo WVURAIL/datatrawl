@@ -44,7 +44,8 @@ docs:
 # output ~30%.
 diagram:
 	@command -v latexmk >/dev/null && command -v pdftocairo >/dev/null || { \
-	    echo "needs latexmk and pdftocairo (apt: poppler-utils)"; exit 1; }
+	    echo "needs latexmk and pdftocairo (apt: poppler-utils);" \
+	         "CANFAR images ship no TeX -- build locally"; exit 1; }
 	cd assets && for t in *.tex; do \
 	    latexmk -pdf -interaction=nonstopmode -halt-on-error \
 	        -outdir=out $$t || exit 1; \

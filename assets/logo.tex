@@ -1,0 +1,21 @@
+% datatrawl logo tile -- TikZ source of truth. Regenerate: make diagram
+% 120x120 gradient tile carrying the shared trawl-net mark (trawlmark.tikz);
+% the caught node gets a soft glow, as in the original.
+\documentclass[tikz]{standalone}
+\usetikzlibrary{calc}
+\input{trawlmark.tikz}
+\definecolor{tiletop}{HTML}{123553}
+\definecolor{tilebot}{HTML}{0a1b2e}
+
+\begin{document}
+\begin{tikzpicture}[x=1pt, y=-1pt, every node/.style={inner sep=0pt}]
+\shade[top color=tiletop, bottom color=tilebot, rounded corners=18pt]
+  (0,0) rectangle (120,120);
+% soft glow behind the caught node (concentric fills keep the converted
+% SVG small; a radial shade explodes into thousands of path segments)
+\fill[white, opacity=0.10] (96,40) circle (10pt);
+\fill[white, opacity=0.08] (96,40) circle (7pt);
+\fill[white, opacity=0.07] (96,40) circle (4.5pt);
+\pic {trawlmark};
+\end{tikzpicture}
+\end{document}

@@ -440,12 +440,15 @@ sudo apt-get install --no-install-recommends \
     texlive-fonts-recommended texlive-pictures lmodern latexmk
 ```
 
-The README graphics (architecture diagram, logo banner) are TikZ-sourced:
-`assets/*.tex` are the sources of truth and the committed `assets/*.svg` are
-generated from them --- the banner wordmark and tagline are real, editable
-text. Regenerate after editing with `make diagram` (additionally needs
+The repository graphics (architecture diagram, banner, logo, social card)
+are TikZ-sourced: `assets/*.tex` are the sources of truth and the committed
+`assets/*.svg` are generated from them --- wordmarks and taglines are real,
+editable text, and the trawl-net mark itself lives once in
+`assets/trawlmark.tikz` as a shared TikZ pic. Regenerate after editing with `make diagram` (additionally needs
 `poppler-utils` for `pdftocairo`; `pip install scour` optionally shrinks the
-output).
+output). CANFAR session images ship no TeX and no root, so build
+documentation and diagrams locally, not in a session --- the committed SVGs
+are already the `make diagram` output.
 
 ## Release history and citation
 

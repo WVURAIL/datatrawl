@@ -1,0 +1,55 @@
+% datatrawl social card (GitHub repository preview) -- TikZ source of truth.
+% Regenerate: make diagram
+% 1280x640: two ghosted trawl nets flank a centered full mark, wordmark,
+% letterspaced tagline, and repository URL. Mark from trawlmark.tikz.
+\documentclass[tikz]{standalone}
+\usetikzlibrary{calc}
+\input{trawlmark.tikz}
+\definecolor{cardtop}{HTML}{102f4c}
+\definecolor{cardmid}{HTML}{0c2138}
+\definecolor{cardbot}{HTML}{081320}
+\definecolor{ghost}{HTML}{1f6f86}
+\usepackage{lmodern}
+\usepackage[T1]{fontenc}
+\renewcommand{\familydefault}{\sfdefault}
+
+\begin{document}
+\begin{tikzpicture}[x=1pt, y=-1pt, every node/.style={inner sep=0pt}]
+
+\shade[top color=cardtop, middle color=cardmid, bottom color=cardbot]
+  (0,0) rectangle (1280,640);
+
+% flanking ghost nets (left one mirrored, facing inward). Transformations
+% must ride on the pic itself: an enclosing scope's scale does not reach a
+% pic's path construction.
+% clipped to the card: at 3.2x the nets overflow the canvas, and the
+% standalone page would otherwise grow to fit them
+\begin{scope}
+  \clip (0,0) rectangle (1280,640);
+  \pic[shift={(200,150)}, xscale=-3.2, yscale=3.2, ghost, opacity=0.18] {trawlnet};
+  \pic[shift={(1080,150)}, scale=3.2, ghost, opacity=0.18] {trawlnet};
+\end{scope}
+
+% centered full mark
+\pic[shift={(493.1,9)}, scale=2.6] {trawlmark};
+
+% wordmark, two-tone as in the banner
+\node[anchor=base] (wm) at (640,380)
+  {\fontsize{107}{107}\selectfont\bfseries
+   \textcolor{ink}{data}\textcolor{cyB}{trawl}};
+
+% divider rule
+\draw[cyB, opacity=0.45, line width=1.6pt] (529,405) -- (751,405);
+
+% letterspaced tagline (stretched word gaps span the measured extent)
+\node[anchor=base, text=dim] at (640,446)
+  {\fontsize{23}{27}\selectfont\hbox to 949pt{storage-safe\hfil
+   archive\hfil trawling\hfil for\hfil resumable\hfil
+   telescope-data\hfil analysis}};
+
+% repository URL
+\node[anchor=base, text=cyB] at (640,556)
+  {\fontsize{19}{22}\selectfont\ttfamily github.com/WVURAIL/datatrawl};
+
+\end{tikzpicture}
+\end{document}

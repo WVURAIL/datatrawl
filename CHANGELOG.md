@@ -9,9 +9,11 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Changed
 
-- The README graphics are now TikZ-sourced: `assets/architecture.tex` and
-  `assets/logo-banner.tex` are the sources of truth (the banner wordmark is
-  editable text again), `make diagram` regenerates the committed SVGs
+- The repository graphics are now TikZ-sourced: the four `assets/*.tex`
+  (architecture, banner, logo, social card) are the sources of truth ---
+  wordmarks and taglines are editable text, and the trawl-net mark lives
+  once in `assets/trawlmark.tikz` as a shared pic. `make diagram`
+  regenerates the committed SVGs
   (latexmk + pdftocairo, optional scour), and `make docs` builds the data
   sheet and user guide with the verified TeX toolchain documented in the
   README.

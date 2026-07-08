@@ -12,14 +12,10 @@
 \usepackage[T1]{fontenc}
 \renewcommand{\familydefault}{\sfdefault}
 \usetikzlibrary{calc}
+\input{trawlmark.tikz}
 
 \definecolor{bgtop}{HTML}{0f2c47}
 \definecolor{bgbot}{HTML}{0a1726}
-\definecolor{cyA}{HTML}{7df0e6}
-\definecolor{cyB}{HTML}{34b8e0}
-\definecolor{cyC}{HTML}{2bd4d4}
-\definecolor{ink}{HTML}{e6f3fb}
-\definecolor{dim}{HTML}{9fc2d6}
 
 \begin{document}
 \begin{tikzpicture}[x=1pt, y=-1pt, every node/.style={inner sep=0pt}]
@@ -29,36 +25,7 @@
   (0,0) rectangle (900,240);
 
 % ------------------------------------------------------- trawl-ring mark
-% the net: ring + mesh, data dots drifting in from the left, one caught
-\draw[cyB, line width=2.4pt] (55,60) circle (42pt);
-\begin{scope}
-  \clip (55,60) circle (41pt);
-  \draw[cyB!70!bgbot, line width=1.0pt]
-    (13,44) .. controls (40,58) and (70,58) .. (97,44)
-    (13,60) .. controls (40,74) and (70,74) .. (97,60)
-    (13,76) .. controls (40,90) and (70,90) .. (97,76)
-    (33,22) .. controls (43,55) and (43,65) .. (33,98)
-    (55,18) .. controls (63,55) and (63,65) .. (55,102)
-    (77,22) .. controls (83,55) and (83,65) .. (77,98);
-\end{scope}
-
-% incoming data dots (positions from the original)
-\fill[cyA]           (10,40) circle (2.0pt);
-\fill[cyA!80!bgbot]  (14,52) circle (1.6pt);
-\fill[cyA!65!bgbot]  ( 9,62) circle (1.4pt);
-\fill[cyA]           (16,69) circle (2.1pt);
-\fill[cyA!70!bgbot]  (12,79) circle (1.5pt);
-\fill[cyA!85!bgbot]  (21,60) circle (2.2pt);
-
-% the caught one, ringed
-\draw[cyC, line width=1.4pt] (96,40) circle (3.6pt);
-\fill[cyA]                   (96,40) circle (1.7pt);
-
-% wake trails behind the net
-\draw[cyB!45!bgbot, line width=1.1pt]
-  (58,112) .. controls (75,124) and (95,130) .. (120,132)
-  (50,122) .. controls (68,136) and (92,144) .. (118,148)
-  (62,132) .. controls (76,146) and (94,154) .. (112,158);
+\pic {trawlmark};
 
 % ---------------------------------------------------------------- wordmark
 % real text: "data" in ink, "trawl" in the cyan family
