@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- The README graphics are now TikZ-sourced: `assets/architecture.tex` and
+  `assets/logo-banner.tex` are the sources of truth (the banner wordmark is
+  editable text again), `make diagram` regenerates the committed SVGs
+  (latexmk + pdftocairo, optional scour), and `make docs` builds the data
+  sheet and user guide with the verified TeX toolchain documented in the
+  README.
+
 ## [1.0.0] - 2026-07-03
 
 First stable release. The engine is functionally identical to v0.2.0; this

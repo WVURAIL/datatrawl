@@ -424,16 +424,28 @@ scoped to land as a single PR against
 
 The formal data sheet and user guide (`docs/Datatrawl_DS001_v1_2_Data_Sheet.tex`,
 `docs/Datatrawl_UG001_v1_2_User_Guide.tex`) share the WVURAIL house style with
-the PilotProxy documents. Generated PDFs are ignored by git. Build locally when
-needed:
+the PilotProxy documents. Generated PDFs are ignored by git. Build locally with:
 
 ```bash
-mkdir -p docs/out
-(cd docs && latexmk -g -pdf -interaction=nonstopmode -halt-on-error \
-  -outdir=out Datatrawl_DS001_v1_2_Data_Sheet.tex)
-(cd docs && latexmk -g -pdf -interaction=nonstopmode -halt-on-error \
-  -outdir=out Datatrawl_UG001_v1_2_User_Guide.tex)
+make docs        # latexmk; PDFs in docs/out/
 ```
+
+The toolchain on Debian/Ubuntu (verified package set --- each package below
+is required; `--no-install-recommends` with anything less fails on
+`lmodern.sty`):
+
+```bash
+sudo apt-get install --no-install-recommends \
+    texlive-latex-base texlive-latex-recommended texlive-latex-extra \
+    texlive-fonts-recommended texlive-pictures lmodern latexmk
+```
+
+The README graphics (architecture diagram, logo banner) are TikZ-sourced:
+`assets/*.tex` are the sources of truth and the committed `assets/*.svg` are
+generated from them --- the banner wordmark and tagline are real, editable
+text. Regenerate after editing with `make diagram` (additionally needs
+`poppler-utils` for `pdftocairo`; `pip install scour` optionally shrinks the
+output).
 
 ## Release history and citation
 
