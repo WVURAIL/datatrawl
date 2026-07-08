@@ -25,7 +25,8 @@ same command**.
 ## Symptom -> fix
 
 ### `datatrail` server not responding (survey or doctor)
-datatrawl reaches Datatrail through its Python API; a transient "Datatrail Server at
+datatrawl reaches Datatrail through its CLI's machine-readable mode
+(`datatrail ls/ps --json`); a transient "Datatrail Server at
 CHIME is not responding" is the central server being briefly down, not a config or auth
 problem. `doctor` reports it as a non-fatal `[--] datatrail scope(s) not validated`
 (skipped, not failed). Don't start a `survey` while it persists -- with no listing,

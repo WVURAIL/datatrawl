@@ -171,8 +171,17 @@ class Datatrail:
         empty dict is a genuine "nothing registered here". The distinction
         exists because a discovery walk must never let an outage read as
         emptiness -- the unchecked helpers below collapse both to [] for
-        callers whose contract already says "treat [] as couldn't-determine"."""
+        callers whose contract already says "treat [] as couldn't-determine".
+
+        Shape guard: a non-error answer must carry the key this arity is
+        defined to return (`scopes` / `larger_datasets` / `datasets` -- dtcli
+        constructs the first and third, the server the second, and 0.11 emits
+        the key even when its list is empty). A parsed dict WITHOUT it is a
+        contract change in a newer datatrail-cli, and with an open-ended
+        version pin it must read as not-answered, never as an empty scope."""
         args = ["ls"] + [a for a in (scope, dataset) if a]
+        key = "datasets" if dataset else ("larger_datasets" if scope
+                                          else "scopes")
         payload, diag = _run_json(args)
         if payload is None:
             sys.stderr.write(f"[datatrail ls scope={scope} dataset={dataset}] "
@@ -181,6 +190,12 @@ class Datatrail:
         if payload.get("error"):
             sys.stderr.write(f"[datatrail ls scope={scope} dataset={dataset}] "
                              f"{payload['error']}\n")
+            return {}, False
+        if key not in payload:
+            sys.stderr.write(
+                f"[datatrail ls scope={scope} dataset={dataset}] unexpected "
+                f"--json shape (no {key!r} key) -- datatrail-cli newer than "
+                f"this adapter understands?\n")
             return {}, False
         return payload, True
 
@@ -246,7 +261,11 @@ class Datatrail:
 
         Contract mirrors common_path():
           (None, [], False)  = the CLI/service did not answer (retried) --
-                               includes the {"error": ...} envelope (exit 1);
+                               includes the {"error": ...} envelope (exit 1),
+                               and (unretried -- it is deterministic, not
+                               transient) a success payload MISSING the
+                               "files" key, which 0.11 always emits: that is
+                               schema drift in a newer CLI, never no-data;
           (None, [], True)   = queried OK, no minoc files for this dataset
                                ("files" null, or without minoc replicas);
           (path, names, True) = resolved. `path` is prefixed cadc:CHIMEFRB/
@@ -267,7 +286,17 @@ class Datatrail:
                     delay *= 2
                     continue
                 return None, [], False        # did not answer, retried out
-            files_resp = payload.get("files")
+            if "files" not in payload:
+                # 0.11's success payload always carries the key ("files" may
+                # be null, but it is present). A non-error dict without it is
+                # a changed contract in a newer datatrail-cli -- deterministic,
+                # so no retry -- and must never read as "dataset has no files".
+                sys.stderr.write(f"[datatrail ps {scope} {dataset}] unexpected"
+                                 f" --json shape (no 'files' key) -- "
+                                 f"datatrail-cli newer than this adapter "
+                                 f"understands?\n")
+                return None, [], False
+            files_resp = payload["files"]
             # "files": null is the CLI's rendering of functions.ps returning
             # (None, policy) -- the find half had no answer for this name
             # while policies resolved. For a dataset the map says exists,

@@ -422,7 +422,8 @@ The subprocess boundary keeps the failure classes the in-process calls
 avoided: the child is `sys.executable -m dtcli.cli` (the same interpreter that
 imports datatrawl, so nothing depends on a `datatrail` binary being on PATH),
 parsing skips dtcli's update-available banner, and every call carries a hard
-timeout so a wedged child reads as an outage -- retried, never mistaken for an
+timeout (`DATATRAWL_DATATRAIL_TIMEOUT`, seconds, default 300) so a wedged
+child reads as an outage -- retried, never mistaken for an
 empty archive -- instead of stalling a survey worker.
 
 ## Build documentation

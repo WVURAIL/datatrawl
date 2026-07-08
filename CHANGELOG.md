@@ -21,6 +21,12 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
   requires `datatrail-cli>=0.11.0` (previously `>=0.10.3,<0.11`). One
   tightening: partial server degradations the internal API surfaced as
   malformed shapes now read as outages (retried), never as "no files".
+  Because the pin now has no ceiling, the adapter also guards the payload
+  shape itself: a non-error `--json` answer missing the key its arity is
+  defined to return (`scopes`/`larger_datasets`/`datasets` for `ls`, `files`
+  for `ps` --- 0.11 always emits them, empty or null included) classifies as
+  not-answered, so a future datatrail-cli that changes the contract degrades
+  loudly to the outage path instead of silently reading as empty datasets.
 
 - The repository graphics are now TikZ-sourced: the four `assets/*.tex`
   (architecture, banner, logo, social card) are the sources of truth ---

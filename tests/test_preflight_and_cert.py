@@ -234,6 +234,22 @@ def test_listing_nonjson_stdout_is_not_answered(monkeypatch):
     assert (datasets, ok) == ([], False)
 
 
+def test_listing_shape_drift_is_not_answered(monkeypatch):
+    # a parsed non-error dict MISSING the key this arity is defined to return
+    # (a changed contract in a newer datatrail-cli -- the pin has no ceiling)
+    # must read as not-answered, never as a scope with nothing under it
+    _install_fake_cli(monkeypatch, lambda a: (
+        0, json.dumps({"renamed_in_0_12": []}), ""))
+    assert src.DATATRAIL.list_scopes_checked() == ([], False)
+    assert src.DATATRAIL.list_datasets_checked("s") == ([], False)
+    assert src.DATATRAIL.children_checked("s", "d") == ([], False)
+    # while the key PRESENT with an empty list stays a genuine "nothing
+    # registered here" -- the row recon is allowed to write to the map
+    _install_fake_cli(monkeypatch, lambda a: (
+        0, json.dumps({"larger_datasets": []}), ""))
+    assert src.DATATRAIL.list_datasets_checked("s") == ([], True)
+
+
 # ==========================================================================
 # files() / common_path() go through `datatrail ps --json`: verify each
 # payload shape maps onto the unchanged outage-vs-empty contract
@@ -273,6 +289,22 @@ def test_files_no_minoc_null_and_outage(monkeypatch):
     _install_fake_cli(monkeypatch, lambda a: (1, json.dumps(
         {"error": {"files": "boom", "policies": "boom"}}), ""))
     assert src.DATATRAIL.files("s", "d", retries=0) == (None, [], False)
+
+
+def test_files_shape_drift_is_outage_without_retry(monkeypatch):
+    # a success payload without the "files" key (0.11 always emits it, null
+    # or not) is schema drift: never "dataset has no files", and -- being
+    # deterministic -- returned immediately, not retried through backoff
+    calls = []
+
+    def handler(args):
+        calls.append(args)
+        return 0, json.dumps({"dataset": "d", "scope": "s",
+                              "policies": {}}), ""
+
+    _install_fake_cli(monkeypatch, handler)
+    assert src.DATATRAIL.files("s", "d", retries=3) == (None, [], False)
+    assert len(calls) == 1
 
 
 def test_files_spawn_failure_is_outage(monkeypatch):
