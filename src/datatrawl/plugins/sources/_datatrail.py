@@ -197,6 +197,18 @@ class Datatrail:
                 f"--json shape (no {key!r} key) -- datatrail-cli newer than "
                 f"this adapter understands?\n")
             return {}, False
+        if not isinstance(payload[key], list):
+            # Observed live: with the scopes endpoint unreachable behind a
+            # proxy, dtcli 0.11.0 leaked the error text through as
+            # {"scopes": "<proxy error prose>"} with exit 0 (decode_response
+            # passes non-JSON bodies along as str). list("<str>") would
+            # shred that into per-character "scopes" -- classify as
+            # not-answered instead.
+            sys.stderr.write(
+                f"[datatrail ls scope={scope} dataset={dataset}] non-list "
+                f"{key!r} value ({type(payload[key]).__name__}) -- treating "
+                f"as not answered\n")
+            return {}, False
         return payload, True
 
     @classmethod
@@ -301,7 +313,16 @@ class Datatrail:
             # (None, policy) -- the find half had no answer for this name
             # while policies resolved. For a dataset the map says exists,
             # that reads as "no files", same as the no-minoc case below.
-            if not isinstance(files_resp, dict):
+            # Any OTHER non-dict value (a string, say -- 0.11 wraps string
+            # halves in the error envelope, so this shape is unowned) is
+            # degradation or drift, never a no-data verdict.
+            if files_resp is not None and not isinstance(files_resp, dict):
+                sys.stderr.write(f"[datatrail ps {scope} {dataset}] non-dict "
+                                 f"'files' value "
+                                 f"({type(files_resp).__name__}) -- treating "
+                                 f"as not answered\n")
+                return None, [], False
+            if files_resp is None:
                 return None, [], True
             uris = (files_resp.get("file_replica_locations") or {}).get("minoc")
             if not uris:

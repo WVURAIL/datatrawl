@@ -27,6 +27,10 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
   for `ps` --- 0.11 always emits them, empty or null included) classifies as
   not-answered, so a future datatrail-cli that changes the contract degrades
   loudly to the outage path instead of silently reading as empty datasets.
+  The guard covers value types too: a non-list `ls` value (observed live ---
+  a proxy's error text leaked through as `{"scopes": "<prose>"}` with
+  exit 0) or a non-null non-dict `files` value classifies as not-answered,
+  never as an empty scope or a no-data verdict.
 
 - The repository graphics are now TikZ-sourced: the four `assets/*.tex`
   (architecture, banner, logo, social card) are the sources of truth ---

@@ -250,6 +250,18 @@ def test_listing_shape_drift_is_not_answered(monkeypatch):
     assert src.DATATRAIL.list_datasets_checked("s") == ([], True)
 
 
+def test_listing_nonlist_value_is_not_answered(monkeypatch):
+    # captured live from dtcli 0.11.0 behind a blocking proxy: the scopes
+    # endpoint's error text leaked through as the VALUE, with exit 0 --
+    # naive list() would shred it into per-character "scopes"
+    _install_fake_cli(monkeypatch, lambda a: (0, json.dumps(
+        {"scopes": "Host not in allowlist: frb.chimenet.ca."}), ""))
+    assert src.DATATRAIL.list_scopes_checked() == ([], False)
+    _install_fake_cli(monkeypatch, lambda a: (
+        0, json.dumps({"datasets": "oops"}), ""))
+    assert src.DATATRAIL.children_checked("s", "d") == ([], False)
+
+
 # ==========================================================================
 # files() / common_path() go through `datatrail ps --json`: verify each
 # payload shape maps onto the unchanged outage-vs-empty contract
@@ -301,6 +313,22 @@ def test_files_shape_drift_is_outage_without_retry(monkeypatch):
         calls.append(args)
         return 0, json.dumps({"dataset": "d", "scope": "s",
                               "policies": {}}), ""
+
+    _install_fake_cli(monkeypatch, handler)
+    assert src.DATATRAIL.files("s", "d", retries=3) == (None, [], False)
+    assert len(calls) == 1
+
+
+def test_files_nonnull_nondict_value_is_outage(monkeypatch):
+    # a string "files" value is degradation or drift (0.11 wraps string
+    # halves in the error envelope, so this shape is unowned): must never
+    # read as the no-data verdict that "files": null legitimately carries
+    calls = []
+
+    def handler(args):
+        calls.append(args)
+        return 0, json.dumps({"dataset": "d", "scope": "s",
+                              "files": "Server hiccup", "policies": {}}), ""
 
     _install_fake_cli(monkeypatch, handler)
     assert src.DATATRAIL.files("s", "d", retries=3) == (None, [], False)
