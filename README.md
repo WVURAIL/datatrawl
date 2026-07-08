@@ -407,24 +407,14 @@ inputs are in [`docs/ADDING_AN_ANALYZER.md`](docs/ADDING_AN_ANALYZER.md).
 
 ## Design notes
 
-`datatrawl` talks to Datatrail through the `datatrail` CLI's machine-readable
-mode: the survey step runs `datatrail ls --json` and `datatrail ps --json` and
-parses the structured payloads -- never the human-oriented Rich tables. That
-mode is the stable public contract
-[CHIMEFRB/datatrail-cli](https://github.com/CHIMEFRB/datatrail-cli) added in
-0.11.0 (upstream PR #160), which resolves the `UPSTREAM NOTE` earlier
-datatrawl releases carried in
-[`src/datatrawl/plugins/sources/_datatrail.py`](src/datatrawl/plugins/sources/_datatrail.py):
-until 0.11 the only structured surface was the internal `dtcli.src.functions`
-module, which datatrawl imported directly and pinned `<0.11`.
-
-The subprocess boundary keeps the failure classes the in-process calls
-avoided: the child is `sys.executable -m dtcli.cli` (the same interpreter that
-imports datatrawl, so nothing depends on a `datatrail` binary being on PATH),
-parsing skips dtcli's update-available banner, and every call carries a hard
-timeout (`DATATRAWL_DATATRAIL_TIMEOUT`, seconds, default 300) so a wedged
-child reads as an outage -- retried, never mistaken for an
-empty archive -- instead of stalling a survey worker.
+`datatrawl` drives Datatrail through the CLI's machine-readable mode --
+`datatrail ls --json` / `ps --json` (datatrail-cli >= 0.11), spawned from the
+same interpreter that imports datatrawl -- with a hard per-call timeout
+(`DATATRAWL_DATATRAIL_TIMEOUT`, seconds, default 300) so a wedged call reads
+as an outage, never as an empty archive. The adapter in
+[`src/datatrawl/plugins/sources/_datatrail.py`](src/datatrawl/plugins/sources/_datatrail.py)
+is the single sanctioned surface; its docstring carries the engineering
+rationale, and the CHANGELOG the migration history.
 
 ## Build documentation
 
