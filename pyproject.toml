@@ -55,11 +55,12 @@ dev = [
 ]
 survey = [
     # `datatrawl survey` walks the Datatrail archive to build inventory.jsonl.
-    # Pin the current internal dtcli API contract until Datatrail exposes a stable
-    # machine-readable public interface.
+    # 0.11.0 is where the machine-readable mode the adapter drives
+    # (`datatrail ls/ps --json`, CHIMEFRB/datatrail-cli#160) landed; the old
+    # `<0.11` cap guarded an internal-module import that no longer exists.
     "cadcdata",
     "cadcutils",
-    "datatrail-cli>=0.10.3,<0.11",
+    "datatrail-cli>=0.11.0",
 ]
 examples = [
     # Plotting a spectrum product (the snippet in the README) needs matplotlib;

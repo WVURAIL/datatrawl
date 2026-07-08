@@ -66,8 +66,9 @@ The shipped `cadc-datatrail` source is specific to CHIME baseband -- it enumerat
 example a processed-acquisition scope whose datasets carry their own attached files) needs a
 *new source*: one that enumerates that scope's datasets and files and yields one `Unit`
 per file. The shipped `cadc-datatrail` source is the reference -- it reaches Datatrail
-through its Python API (`dtcli.src.functions`), not the CLI (`datatrail ls` / `ps` are
-still the way to explore a scope's layout by hand first). Build it in your own project and
+through the CLI's machine-readable mode (`datatrail ls` / `ps` with `--json`,
+datatrail-cli >= 0.11; the same commands without `--json` are still the way to
+explore a scope's layout by hand first). Build it in your own project and
 load it with `--plugin`; nothing in datatrawl changes.
 
 References: `src/datatrawl/plugins/sources/local.py` (a minimal source) and

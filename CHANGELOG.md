@@ -9,6 +9,19 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Changed
 
+- The `cadc-datatrail` source now drives Datatrail through the CLI's
+  machine-readable mode (`datatrail ls/ps --json`, added upstream in
+  datatrail-cli 0.11.0, CHIMEFRB/datatrail-cli#160) instead of importing the
+  internal `dtcli.src.functions` module. This resolves the `UPSTREAM NOTE` in
+  `_datatrail.py` and closes the internal-dependency exception documented in
+  the 1.0.0 release notes. Every adapter method keeps its signature and its
+  outage-vs-empty contract; the child runs as `sys.executable -m dtcli.cli`
+  (no PATH dependence) with a hard per-call timeout
+  (`DATATRAWL_DATATRAIL_TIMEOUT`, default 300 s). The `survey` extra now
+  requires `datatrail-cli>=0.11.0` (previously `>=0.10.3,<0.11`). One
+  tightening: partial server degradations the internal API surfaced as
+  malformed shapes now read as outages (retried), never as "no files".
+
 - The repository graphics are now TikZ-sourced: the four `assets/*.tex`
   (architecture, banner, logo, social card) are the sources of truth ---
   wordmarks and taglines are editable text, and the trawl-net mark lives

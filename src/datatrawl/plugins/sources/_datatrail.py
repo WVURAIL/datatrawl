@@ -1,114 +1,134 @@
 """
 datatrawl <-> datatrail boundary -- the single place datatrawl depends on the
-CHIME/FRB Datatrail CLI distribution (`datatrail-cli`, import name `dtcli`).
+CHIME/FRB Datatrail CLI distribution (`datatrail-cli`).
 
 datatrail is a SURVEY-ONLY dependency. survey() uses it to discover the archive
 landscape -- which scopes, datasets, and events exist -- and to resolve each
 event's CADC common path. The bulk data path (cadcget / cadcinfo) goes straight
-to CADC and never touches datatrail, so nothing here is imported on the
-scan/fetch path.
+to CADC and never touches datatrail, so nothing here runs on the scan/fetch
+path.
 
-We talk to datatrail through its Python API -- the functions in
-`dtcli.src.functions` -- NOT by shelling out to the `datatrail` CLI. The CLI's
-own commands are thin Click wrappers over exactly these functions: `datatrail ls`
-calls `functions.list(...)` and renders the returned dict as a Rich table, and
-common-path resolution calls `functions.find_dataset_common_path(...)`. Calling
-the functions directly returns structured results (dicts keyed `scopes` /
-`larger_datasets` / `datasets`, or `error`) instead of subprocess output we would
-have to scrape, and removes a class of environment failures: CLI-not-on-PATH,
-user-site isolation, and terminal-width-dependent table truncation.
+We talk to datatrail through the CLI's machine-readable mode -- `datatrail ls
+--json` and `datatrail ps --json` -- the stable, public contract added upstream
+in datatrail-cli 0.11.0 (CHIMEFRB/datatrail-cli#160). That PR resolves the
+UPSTREAM NOTE this module carried through 1.0.0: earlier releases had to choose
+between scraping the CLI's Rich tables (terminal-width-dependent text) and
+importing `dtcli.src.functions` (internal, unversioned); we shipped the latter,
+pinned `<0.11`. With `--json`, both couplings are gone. The payloads are the
+same dicts the internal functions returned -- `ls` prints the
+`scopes` / `larger_datasets` / `datasets` / `error` dict verbatim (exit 1 when
+`error` is present), and `ps` wraps the files+policies pair as
+`{"dataset", "scope", "files", "policies"}` or an `{"error": ...}` envelope
+with exit 1 -- so every adapter method keeps its signature and its
+outage-vs-empty contract; only the transport underneath changed.
 
-The one cost is coupling to an internal module: `dtcli.src.functions` is not a
-published, stable API (the `src` namespace signals as much). We accept that
-deliberately -- scraping the CLI's rendered table coupled us to an even less
-stable surface (its exact pretty-printed text) -- and contain it here:
-`api_available()` verifies the symbols we call exist, so a datatrail upgrade that
-moves or renames one becomes a clean, up-front `doctor` failure rather than a
-mid-survey stall.
+Invocation notes, so the failure classes the old in-process calls avoided
+stay avoided:
+  * The child is `sys.executable -m dtcli.cli`, never a `datatrail` looked up
+    on PATH: the interpreter that imports datatrawl is the one that runs
+    dtcli, so CLI-not-on-PATH and user-site isolation cannot bite.
+  * dtcli's group callback prints an update-available banner to STDOUT before
+    any command when PyPI shows a newer release; _extract_json() parses past
+    any such preamble.
+  * The child inherits the environment plus NO_COLOR=1 / TERM=dumb / PAGER=cat,
+    so captured output is plain text and can never block on a pager.
+  * Every call carries a hard timeout (DATATRAWL_DATATRAIL_TIMEOUT, default
+    300 s); a wedged child is killed and read as an outage instead of stalling
+    a survey worker forever.
 
-UPSTREAM NOTE (parked, recorded here so it is not lost):
-    The clean long-term fix is a machine-readable mode on the CLI -- e.g.
-    `datatrail ls --json` writing the same dict to stdout -- which would give a
-    *stable, public* contract and let us drop the internal-module import
-    entirely. That needs a PR to CHIMEFRB/datatrail-cli (we have no write
-    access), so it is deferred. Until then, the direct `functions.*` calls below
-    are the pragmatic choice; if `--json` lands, only the listing methods here
-    change, behind unchanged signatures.
+One deliberate tightening vs. the internal-API era: partial server
+degradations that functions.ps() surfaced as odd shapes (a files or policies
+half decoded to a bare string) used to fall through as "queried OK, no files".
+The CLI reports those as an error envelope with exit 1, and this adapter maps
+that to ok=False -- an outage, retried, never mistaken for emptiness -- which
+is the contract every caller was already written against.
 """
 from __future__ import annotations
 
-import contextlib
-import logging
+import json
 import os
 import re
+import subprocess
 import sys
 import time
-from typing import List
+from typing import List, Optional, Sequence, Tuple
 
-# event IDs are embedded in datatrail's child-dataset names; the only parsing we
-# still do is pulling those IDs out of the (now structured) name list.
+# event IDs are embedded in datatrail's child-dataset names; the only parsing
+# we still do is pulling those IDs out of the (structured) name list.
 _EVENT_RE = re.compile(r"\b\d{6,}\b")
 
-# the dtcli.src.functions symbols datatrawl calls -- checked by api_available().
-_REQUIRED_FUNCS = ("list", "find_dataset_common_path", "ps")
+# the public contract this adapter drives -- `datatrail ls/ps --json` -- landed
+# in datatrail-cli 0.11.0. Checked by api_available() so doctor reports an old
+# install before a run rather than survey misreading it as an outage mid-walk.
+_MIN_CLI = (0, 11)
 
-# dtcli configures a root RichHandler (dtcli/__init__.py basicConfig) and logs
-# through these named loggers. When its config file is absent, config.procure()
-# calls log.exception(), dumping a full traceback to the console -- and
-# functions.list(quiet=True) only lowers the "functions" logger, never "config",
-# so the quiet flag cannot suppress it. We already turn any failure on this path
-# into our own one-line stderr message (and a clean doctor "[--]" line), so that
-# traceback is pure noise. Silence dtcli's own loggers around each call.
-_DTCLI_LOGGERS = ("config", "functions", "dtcli")
+# hard per-call child timeout. The in-process calls this replaces could hang
+# on a wedged HTTP request too; the subprocess boundary lets us actually
+# bound it. Timeout kills the child and reads as an outage (retried).
+_TIMEOUT_S = float(os.environ.get("DATATRAWL_DATATRAIL_TIMEOUT", "300"))
 
 
-@contextlib.contextmanager
-def _quiet_dtcli_logging():
-    """Mute datatrail-cli's internal loggers for the duration of a call.
-
-    Level alone cannot do this: every dtcli function begins with
-    utilities.set_log_level(logger, verbose, quiet), which under quiet=True
-    re-arms its own logger to ERROR *inside the call* -- so a pre-set
-    CRITICAL+1 is overwritten and dtcli's ERROR records (e.g. 'Service not
-    responding.') still hit the root RichHandler, duplicating the one-line
-    message our adapter already prints. Blocking propagation (and any
-    directly-attached handlers) is outage-proof because set_log_level only
-    touches the level. Everything is restored on exit; scoped to dtcli's own
-    loggers, so nothing else is affected.
-    """
-    saved = []
-    for n in _DTCLI_LOGGERS:
-        lg = logging.getLogger(n)
-        saved.append((lg, lg.level, lg.propagate, list(lg.handlers)))
-        lg.setLevel(logging.CRITICAL + 1)
-        lg.propagate = False
-        lg.handlers = []
+def _cli_version() -> "Optional[Tuple[int, ...]]":
+    """Installed datatrail-cli version as an int tuple, or None if unknown."""
     try:
-        yield
-    finally:
-        for lg, level, propagate, handlers in saved:
-            lg.setLevel(level)
-            lg.propagate = propagate
-            lg.handlers = handlers
+        from importlib.metadata import version
+        raw = version("datatrail-cli")
+    except Exception:
+        return None
+    parts = re.findall(r"\d+", raw)
+    return tuple(int(p) for p in parts[:3]) if parts else None
 
 
-def _functions():
-    """Import and return dtcli.src.functions, or raise.
+def _extract_json(stdout: str) -> "Optional[dict]":
+    """The JSON object in a --json invocation's stdout, or None.
 
-    Callers either guard with installed()/api_available() first, or catch the
-    import error and degrade (the listing helpers and common_path do the latter).
+    The payload is not always at offset 0 -- dtcli prints its update-available
+    banner to stdout ahead of the command output -- so parse from the first
+    '{'. Every --json payload is a single object; stdout without one (empty,
+    or the Rich scopes table the invalid-scope path renders) yields None,
+    which callers treat as "the CLI did not answer".
     """
-    from dtcli.src import functions
-    return functions
+    i = stdout.find("{")
+    if i < 0:
+        return None
+    try:
+        obj = json.loads(stdout[i:])
+    except ValueError:
+        return None
+    return obj if isinstance(obj, dict) else None
+
+
+def _run_json(args: "Sequence[str]") -> "tuple[Optional[dict], str]":
+    """Run `datatrail <args> --json`; (payload, diag).
+
+    payload=None means the CLI did not answer with JSON -- spawn failure,
+    timeout (child killed), or non-JSON stdout -- and diag says why, one line.
+    Service-level errors ARE JSON ({"error": ...} with exit 1) and come back
+    as a payload for the caller to classify. Never raises.
+    """
+    cmd = [sys.executable, "-m", "dtcli.cli", *args, "--json"]
+    env = dict(os.environ, NO_COLOR="1", TERM="dumb", PAGER="cat")
+    try:
+        proc = subprocess.run(cmd, capture_output=True, text=True,
+                              timeout=_TIMEOUT_S, env=env)
+    except Exception as exc:                      # spawn failure / TimeoutExpired
+        return None, f"{type(exc).__name__}: {exc}"
+    payload = _extract_json(proc.stdout)
+    if payload is None:
+        tail = (proc.stderr or "").strip().splitlines()
+        return None, (f"exit {proc.returncode}, no JSON on stdout"
+                      + (f" ({tail[-1]})" if tail else ""))
+    return payload, ""
 
 
 class Datatrail:
-    """Typed adapter over datatrail's Python API (`dtcli.src.functions`).
+    """Typed adapter over datatrail's machine-readable CLI (`--json`).
 
-    Stateless: every method imports + calls per invocation, so one shared instance
-    is safe to reuse and to call from the survey verify pool. The listing methods
-    degrade to [] on any datatrail-reported error (logged to stderr); callers must
-    treat [] as "couldn't determine", never as "definitively empty".
+    Stateless: every method spawns one `datatrail` child per invocation, so one
+    shared instance is safe to reuse and to call from the survey verify pool.
+    The listing methods degrade to [] on any datatrail-reported error (logged
+    to stderr); callers must treat [] as "couldn't determine", never as
+    "definitively empty".
     """
 
     # -- availability (for doctor / preflight) -----------------------------
@@ -123,48 +143,46 @@ class Datatrail:
 
     @staticmethod
     def api_available() -> "tuple[bool, str]":
-        """(ok, detail): does dtcli.src.functions expose the symbols we call?
+        """(ok, detail): does the installed datatrail speak the JSON contract?
 
-        Contains datatrawl's single internal coupling to datatrail, so doctor can
-        report a moved/renamed function before a run rather than survey failing on
-        it mid-walk. `detail` names the missing symbol(s) when not ok.
+        The coupling is a public CLI flag now instead of an internal module,
+        but the doctor-time check survives for the same reason it existed: a
+        pre-0.11 datatrail-cli (no --json) would misread as a service outage
+        an hour into a survey; report the real cause up front instead.
+        `detail` says what to install when not ok.
         """
-        try:
-            functions = _functions()
-        except Exception as exc:
-            return False, (f"cannot import dtcli.src.functions "
-                           f"({type(exc).__name__}: {exc})")
-        missing = [n for n in _REQUIRED_FUNCS
-                   if not callable(getattr(functions, n, None))]
-        if missing:
-            return False, f"dtcli.src.functions is missing {missing}"
+        v = _cli_version()
+        if v is None:
+            return False, ("cannot determine the datatrail-cli version "
+                           "(is datatrail-cli installed in this environment?)")
+        if v < _MIN_CLI:
+            return False, (f"datatrail-cli {'.'.join(map(str, v))} predates "
+                           f"the --json machine-readable mode; install "
+                           f"datatrail-cli>=0.11")
         return True, ""
 
-    # -- discovery (listing), via functions.list(...) ----------------------
+    # -- discovery (listing), via `datatrail ls --json` ---------------------
     @staticmethod
     def _list_result_checked(scope=None, dataset=None) -> "tuple[dict, bool]":
-        """functions.list(...) -> (dict, ok).
+        """`datatrail ls [scope [dataset]] --json` -> (dict, ok).
 
-        ok=False means the SERVICE could not answer (exception, or datatrail's
-        own {"error": ...}); the dict is then {}. ok=True with an empty dict is
-        a genuine "nothing registered here". The distinction exists because a
-        discovery walk must never let an outage read as emptiness -- the
-        unchecked helpers below collapse both to [] for callers whose contract
-        already says "treat [] as couldn't-determine"."""
-        try:
-            with _quiet_dtcli_logging():
-                res = _functions().list(scope, dataset, quiet=True)
-        except Exception as exc:
-            sys.stderr.write(f"[datatrail list scope={scope} dataset={dataset}] "
-                             f"{type(exc).__name__}: {exc}\n")
+        ok=False means the SERVICE could not answer (no JSON came back, or
+        datatrail's own {"error": ...}); the dict is then {}. ok=True with an
+        empty dict is a genuine "nothing registered here". The distinction
+        exists because a discovery walk must never let an outage read as
+        emptiness -- the unchecked helpers below collapse both to [] for
+        callers whose contract already says "treat [] as couldn't-determine"."""
+        args = ["ls"] + [a for a in (scope, dataset) if a]
+        payload, diag = _run_json(args)
+        if payload is None:
+            sys.stderr.write(f"[datatrail ls scope={scope} dataset={dataset}] "
+                             f"{diag}\n")
             return {}, False
-        if not isinstance(res, dict):
+        if payload.get("error"):
+            sys.stderr.write(f"[datatrail ls scope={scope} dataset={dataset}] "
+                             f"{payload['error']}\n")
             return {}, False
-        if res.get("error"):
-            sys.stderr.write(f"[datatrail list scope={scope} dataset={dataset}] "
-                             f"{res['error']}\n")
-            return {}, False
-        return res, True
+        return payload, True
 
     @classmethod
     def _list_result(cls, scope=None, dataset=None) -> dict:
@@ -172,7 +190,7 @@ class Datatrail:
         return res
 
     def list_scopes(self) -> List[str]:
-        """Every scope datatrail can see (functions.list with no scope)."""
+        """Every scope datatrail can see (`datatrail ls` with no scope)."""
         return self.list_scopes_checked()[0]
 
     def list_scopes_checked(self) -> "tuple[List[str], bool]":
@@ -215,48 +233,45 @@ class Datatrail:
         return [ev for name in self.children(scope, dataset)
                 for ev in _EVENT_RE.findall(name)]
 
-    # -- file listing (the programmatic half of `datatrail ps -s`) ----------
+    # -- file listing (`datatrail ps --json`, reduced) -----------------------
     def files(self, scope: str, dataset: str, *, retries: int = 3,
               base: float = 4.0) -> tuple:
         """(common_path, [names], ok) for one dataset's minoc files.
 
-        This is what `datatrail ps <scope> <dataset> -s` renders as a table:
-        the CADC common path plus each file under it. Exposed here so an
-        analyzer resolving a per-day companion (a gains day-dataset, say)
-        never scrapes the Rich table or imports dtcli internals itself --
-        this adapter is chartered as the ONE place datatrawl touches dtcli.
+        This is `datatrail ps <scope> <dataset> --json`, reduced to the minoc
+        replica list. Exposed here so an analyzer resolving a per-day
+        companion (a gains day-dataset, say) never scrapes the Rich table or
+        imports dtcli internals itself -- this adapter is chartered as the ONE
+        place datatrawl touches datatrail.
 
         Contract mirrors common_path():
-          (None, [], False)  = the service did not answer (retried);
-          (None, [], True)   = queried OK, no minoc files for this dataset;
+          (None, [], False)  = the CLI/service did not answer (retried) --
+                               includes the {"error": ...} envelope (exit 1);
+          (None, [], True)   = queried OK, no minoc files for this dataset
+                               ("files" null, or without minoc replicas);
           (path, names, True) = resolved. `path` is prefixed cadc:CHIMEFRB/
                                 like common_path(); `names` are relative to
                                 it, in server order, so a fetch URI is
                                 f"{path}/{name}".
 
-        Normalization replicates dtcli's own (find_dataset_common_path):
-        strip the cadc:CHIMEFRB/ prefix, collapse '//', commonprefix trimmed
-        to the last '/'.
+        Normalization is unchanged from the internal-API era (and matches
+        dtcli's own find_dataset_common_path): strip the cadc:CHIMEFRB/
+        prefix, collapse '//', commonprefix trimmed to the last '/'.
         """
-        try:
-            functions = _functions()
-        except Exception:
-            return None, [], False
         delay = base
         for k in range(retries + 1):
-            try:
-                with _quiet_dtcli_logging():
-                    files_resp, _policy = functions.ps(scope, dataset,
-                                                       quiet=True)
-            except Exception:
+            payload, _diag = _run_json(["ps", scope, dataset])
+            if payload is None or "error" in payload:
                 if k < retries:
                     time.sleep(delay)
                     delay *= 2
                     continue
-                return None, [], False        # transport failure, retried out
-            # ps returns (None, policy) when the server answered with an
-            # error for the files half -- for a dataset the map says exists,
-            # that reads as "no files", same as common_path's no-minoc case.
+                return None, [], False        # did not answer, retried out
+            files_resp = payload.get("files")
+            # "files": null is the CLI's rendering of functions.ps returning
+            # (None, policy) -- the find half had no answer for this name
+            # while policies resolved. For a dataset the map says exists,
+            # that reads as "no files", same as the no-minoc case below.
             if not isinstance(files_resp, dict):
                 return None, [], True
             uris = (files_resp.get("file_replica_locations") or {}).get("minoc")
@@ -275,39 +290,21 @@ class Datatrail:
     # -- common-path resolution --------------------------------------------
     def common_path(self, scope: str, event: str, *, retries: int = 3,
                     base: float = 4.0) -> tuple:
-        """Resolve an event's CADC common path via find_dataset_common_path.
+        """Resolve an event's CADC common path.
 
-        This has always used the library call, never the CLI: `datatrail ps`
-        renders a Rich table that wraps/truncates long paths with terminal width,
-        so its text can't be parsed reliably; the function returns the path
-        straight from the central server as a plain string.
+        Same `ps --json` call as files(), reduced to the path. datatrail
+        derives its common path from the minoc URI list and files() replicates
+        that normalization exactly, so this equals what dtcli's own
+        find_dataset_common_path computed in the internal-API era -- from the
+        same /query/dataset/find response.
 
-        Contract: (None, False) = couldn't query (transient/service down,
-        retried); (None, True) = queried OK but no minoc files (no-data);
-        (path, True) = resolved, prefixed with the cadc:CHIMEFRB collection.
+        Contract (unchanged): (None, False) = couldn't query (transient /
+        service down, retried); (None, True) = queried OK but no minoc files
+        (no-data); (path, True) = resolved, prefixed with the cadc:CHIMEFRB
+        collection.
         """
-        try:
-            find_dataset_common_path = _functions().find_dataset_common_path
-        except Exception:
-            return None, False
-        delay = base
-        for k in range(retries + 1):
-            try:
-                with _quiet_dtcli_logging():
-                    cp = find_dataset_common_path(scope, event, "", 0, True)
-            except Exception:
-                cp = None
-            if cp is None:                            # queried OK, no minoc files
-                return None, True
-            if isinstance(cp, str) and " " not in cp:  # a real path (no spaces)
-                if not cp.startswith("cadc:"):
-                    cp = "cadc:CHIMEFRB/" + cp.lstrip("/")
-                return cp, True
-            # otherwise cp is the "...Central Server... not reachable!!!" sentence
-            if k < retries:
-                time.sleep(delay)
-                delay *= 2
-        return None, False                            # unreachable after retries
+        cp, _names, ok = self.files(scope, event, retries=retries, base=base)
+        return cp, ok
 
 
 # A shared default instance -- survey orchestration and preflight use this.

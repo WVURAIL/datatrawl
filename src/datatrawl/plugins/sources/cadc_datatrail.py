@@ -754,18 +754,18 @@ class CadcDatatrailSource(DataSource):
         # when datatrail is absent (`requires` already lists it). The whole
         # datatrail surface lives behind the Datatrail adapter (see _datatrail.py).
         if Datatrail.installed():
-            # (a) the datatrail Python API survey calls (listing + common-path).
-            # dtcli.src.functions is an internal module; if an upgrade moves or
-            # renames a function, the live call would misread as a service outage
-            # and stall survey ~an hour before a misleading 'expired cert' abort.
+            # (a) the machine-readable CLI contract survey drives (`datatrail
+            # ls/ps --json`, datatrail-cli >= 0.11). A pre-0.11 install has no
+            # --json flag; the live call would misread as a service outage and
+            # stall survey ~an hour before a misleading 'expired cert' abort.
             # Report the real cause here, before the run, instead.
             ok, detail = Datatrail.api_available()
             if not ok:
                 problems.append(
-                    "datatrail is installed but the Python API datatrawl calls is "
-                    f"unavailable: {detail}. survey uses dtcli.src.functions "
-                    "(`list` + `find_dataset_common_path`); pin datatrail-cli or "
-                    "update the adapter (scan/fetch are unaffected).")
+                    "datatrail is installed but the machine-readable CLI "
+                    f"contract survey drives is unavailable: {detail}. survey "
+                    "uses `datatrail ls/ps --json` (datatrail-cli>=0.11); "
+                    "upgrade datatrail-cli (scan/fetch are unaffected).")
 
             # (b) validate the scope(s) survey will walk against datatrail's live
             # namespace, so a stale/renamed scope fails here instead of silently
