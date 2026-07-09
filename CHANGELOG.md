@@ -9,6 +9,8 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Changed
 
+- CLI: quarantine default-path help text corrected to the real default,
+  results/<tel>/quarantine/<source>--<reader>.jsonl. Credit: external review.
 - The `cadc-datatrail` source now drives Datatrail through the CLI's
   machine-readable mode (`datatrail ls/ps --json`, added upstream in
   datatrail-cli 0.11.0, CHIMEFRB/datatrail-cli#160) instead of importing the

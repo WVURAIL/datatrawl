@@ -1224,7 +1224,7 @@ def build_parser() -> argparse.ArgumentParser:
                              "(note: the whole file is still fetched)")
     p_scan.add_argument("--quarantine", default=None,
                         help="quarantine ledger path (default "
-                             "results/<tel>/quarantine.jsonl); bad/unreadable "
+                             "results/<tel>/quarantine/<source>--<reader>.jsonl); bad/unreadable "
                              "files are recorded here and skipped on re-runs")
     p_scan.add_argument("--no-quarantine", action="store_true",
                         help="disable quarantine; treat unreadable files as "
