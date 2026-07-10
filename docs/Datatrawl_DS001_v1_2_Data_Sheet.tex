@@ -110,7 +110,7 @@
 \begin{minipage}[t]{0.61\textwidth}
   \raggedleft
   {\large\bfseries Storage-Safe Archive Trawling Engine}\par
-  {\small One file at a time. Resumable. Provenance-carrying.}\par
+  {\small Bounded staging. Resumable. Provenance-carrying.}\par
   {\small West Virginia University Radio Astronomy Instrumentation Lab (RAIL)}
 \end{minipage}
 }
@@ -127,8 +127,10 @@ on the target system.}
 
 \section{Features}
 \begin{itemize}
-  \item Streams telescope archives \textbf{one file at a time} under a fixed
-        local-storage budget: fetch, analyze, delete, checkpoint, repeat.
+  \item Streams telescope archives under an explicit, fixed
+        \textbf{local-storage budget}: by default, stage and analyze one file
+        at a time; optionally prefetch up to \code{--max-staged-files}; delete
+        every staged copy after consumption.
   \item \textbf{Resumable products}: the analyzer owns its product file,
         re-loads it on restart, and skips already-accumulated units; a
         kill at any point loses at most the work since the last checkpoint.
@@ -160,9 +162,10 @@ on the target system.}
         contributes is declared by the reader (\field{survey_files});
         inventory rows are self-describing (each records its file
         \field{name}), so a scan stages exactly what the survey verified.
-  \item Atomic product writes (\code{.tmp} then rename), per-invocation
-        staging directories (concurrent scans cannot delete each other's
-        files), and unit-key provenance embedded in every product.
+  \item Atomic product writes (temporary file in the product directory, then
+        atomic replace), per-invocation staging directories (concurrent scans
+        cannot delete each other's files), and unit-key provenance embedded
+        in every product.
   \item Pure-Python core (\code{numpy}, \code{h5py}, \code{pyyaml});
         CANFAR/CADC access and GPU acceleration are optional extras.
 \end{itemize}
@@ -170,9 +173,10 @@ on the target system.}
 \section{What datatrawl Is and Is Not}
 \begin{tabularx}{\linewidth}{L{0.30\linewidth} Y}
 \toprule
-\textbf{Is} & A run layer that walks an archive inventory, stages one file,
-              hands its arrays to a science analyzer, saves a resumable
-              product, and deletes the staged copy. \\
+\textbf{Is} & A run layer that walks an archive inventory, processes one file
+              at a time, hands its arrays to a science analyzer, saves a
+              resumable product, and deletes each staged copy after use. The
+              source may maintain an explicitly bounded prefetch queue. \\
 \textbf{Is} & A contract between an engine and plugins: lifecycle, ordering,
               resume, and provenance rules that make long unattended runs
               safe. \\
@@ -200,7 +204,7 @@ on the target system.}
 \node[blk,right=of src] (rdr) {Reader plugin\\{\scriptsize probe / iter\_arrays}};
 \node[blk,right=of rdr] (ana) {Analyzer plugin\\{\scriptsize consume\_file}};
 \node[soft,below=of ana] (prod) {Resumable product\\{\scriptsize .npz + provenance}};
-\node[soft,below=of src] (stage) {Staging dir\\{\scriptsize one file, then deleted}};
+\node[soft,below=of src] (stage) {Staging dir\\{\scriptsize bounded queue; deleted after use}};
 \draw[->,thick] (arch) -- (src);
 \draw[->,thick] (src) -- (rdr);
 \draw[->,thick] (rdr) -- (ana);
@@ -208,7 +212,7 @@ on the target system.}
 \draw[->,thick] (src) -- (stage);
 \draw[->,thick,dashed] (prod) to[bend left=18] node[above,font=\scriptsize]{resume} (ana);
 \end{tikzpicture}
-\caption{One-pass streaming loop. The engine drives the lifecycle; plugins own
+\caption{Bounded streaming loop. The engine drives the lifecycle; plugins own
 archive access, file decoding, and science.}
 \end{figure}
 

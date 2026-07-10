@@ -1,22 +1,26 @@
 # Long runs, self-healing & troubleshooting
 
 A full pull is *weeks* of data, and nothing about that is fragile: datatrawl
-streams one file at a time, checkpoints continuously, and resumes where it left
-off. When something interrupts a run, the answer is almost always **re-run the
-same command**.
+analyzes one file at a time, checkpoints periodically and at run end, and
+resumes where it left off. When something interrupts a run, the answer is
+almost always **re-run the same command**.
 
 ## How self-healing works
 
-- **Bounded staged files.** At the defaults, the engine stages one file,
-  reduces it, deletes it, and moves on. If you raise `--max-staged-files`,
-  disk use is bounded by that explicit limit.
-  on -- disk never holds more than ~one file. Your archive data is never touched.
+- **Bounded staged files.** At the defaults, the engine stages and analyzes one
+  file at a time, then deletes the staged copy. If you raise
+  `--max-staged-files`, the source may prefetch up to that explicit limit;
+  every staged copy is deleted after it is consumed. Your archive data is
+  never touched.
 - **Independent products when the analyzer fans out.** The built-in `spectrum`
   analyzer fans a multi-freq_id selection into one product per freq_id. Other
-  analyzers may choose a different `plan_runs()` split.
-  products (`614.npz`, `706.npz`); each checkpoints, resumes, and fails on its own.
+  analyzers may choose a different `plan_runs()` split. For example,
+  `--select 614,706` produces `614.npz` and `706.npz`; each checkpoints,
+  resumes, and fails on its own.
 - **Atomic checkpoints.** Every `--checkpoint-every` files (default 50) each
-  product is rewritten via temp file + atomic rename, never left half-written.
+  product is written to a temporary file in its output directory, then
+  atomically replaces the previous checkpoint, so it is never left
+  half-written.
 - **Resume by re-running.** On restart each product reloads, reports which files
   it already holds, and does only the rest. Failed files aren't marked done, so
   they retry automatically.
@@ -64,12 +68,13 @@ nohup datatrawl scan ... --select 614,706 > scan.log 2>&1 &
 or inside `tmux new -s trawl` (detach `Ctrl-b d`, reattach `tmux attach -t trawl`).
 
 ### "No space left on device"
-Steady-state disk is ~one file. For long runs, point `--tmp-dir` at fast
-node-local scratch (`/scratch/...`), not `/arc`. Without `--tmp-dir`, datatrawl
-creates a unique directory under `DATATRAWL_TMPDIR`, writable `/scratch`, or the
-OS temp directory and removes it at exit. A hard kill can leave that one
-invocation directory behind; it is scratch and safe to delete (products live
-under `results/`).
+At the defaults, steady-state scratch use is approximately one staged file. If
+you raise `--max-staged-files`, allow room for up to that many files. For long
+runs, point `--tmp-dir` at fast node-local scratch (`/scratch/...`), not `/arc`.
+Without `--tmp-dir`, datatrawl creates a unique directory under
+`DATATRAWL_TMPDIR`, writable `/scratch`, or the OS temp directory and removes it
+at exit. A hard kill can leave that invocation directory behind; it is scratch
+and safe to delete (products live under `results/`).
 
 ### Some files failed to fetch
 The source retries each a few times with backoff; persistent failures are logged,

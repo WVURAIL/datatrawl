@@ -116,10 +116,11 @@
 Every datatrawl run is four choices: a \textbf{telescope} (geometry and
 metadata), a \textbf{source} (where files come from), a \textbf{reader} (how
 one file becomes arrays), and an \textbf{analyzer} (the science). The engine
-then streams the archive one file at a time --- fetch, analyze, delete,
-checkpoint --- into a single resumable product per run. \code{datatrawl
-doctor} exists to make the four choices and their prerequisites legible
-\emph{before} you spend hours on a scan.
+then processes the archive one file at a time --- fetch, analyze, delete,
+checkpoint --- while optionally maintaining an explicitly bounded prefetch
+queue. The analyzer may split a selection into one or more independently
+resumable products. \code{datatrawl doctor} exists to make the four choices
+and their prerequisites legible \emph{before} you spend hours on a scan.
 
 \section{Installation}
 \begin{lstlisting}
@@ -130,6 +131,7 @@ pip install -e ".[dev,examples]"   # offline/local development
 # For archive/CANFAR use instead:
 #   pip install -e ".[survey,examples,dev]"
 #   cadc-get-cert -u <your_cadc_username>
+#   datatrail config init --site canfar
 datatrawl --version
 pytest -q
 \end{lstlisting}
@@ -226,20 +228,22 @@ datatrawl scan --name chime --analyzer spectrum --select 614,706
 \end{itemize}
 
 \importantbox{Storage safety is the point: at the defaults, at most one staged
-file exists at a time, it lives in a per-invocation staging directory
-(concurrent scans cannot delete each other's files), and it is deleted as soon
-as the analyzer has consumed it. Do not point the staging area at precious
-data.}
+file exists at a time. If \code{--max-staged-files} is raised, no more than
+that explicitly configured number may be staged. The copies live in a
+per-invocation staging directory (concurrent scans cannot delete each other's
+files), and each is deleted as soon as the analyzer has consumed it. Do not
+point the staging area at precious data.}
 
 \section{Kill and Resume}
 A scan may be killed at any instant --- session timeout, preemption,
 \code{Ctrl-C}. On restart with the same configuration and output, the analyzer
 re-loads its product, skips every unit already accumulated, and continues. The
 guarantee: at most the files consumed since the last checkpoint are re-done,
-and the product is never left partially written (saves go to \code{.tmp}, then
-rename). A resume against an \emph{incompatible} existing product is refused
-with an explicit error rather than silently mixing two configurations; use a
-clean output location to rebuild.
+and the product is never left partially written (a temporary file in the
+product directory atomically replaces the previous checkpoint). A resume
+against an \emph{incompatible} existing product is refused with an explicit
+error rather than silently mixing two configurations; use a clean output
+location to rebuild.
 
 \section{CANFAR / CADC Notes}
 On a CANFAR session: install with the \code{[cadc]} (and, for inventory

@@ -71,11 +71,12 @@ listing/staging policy differs, when units are not resolved through the
 Datatrail event common-path pattern, or when the data source is not
 CADC/Datatrail.
 
-The shipped source currently reaches Datatrail through datatrail-cli's
-internal API (pinned datatrail-cli==0.10.3 in production); migration to the
-public `datatrail ls/ps --json` contract (datatrail-cli >= 0.11) is queued.
-It verifies candidate files with CADC metadata, writes a persistent
-inventory, and later fetches units with CADC.
+The shipped source reaches Datatrail through the public machine-readable CLI
+contract, `datatrail ls/ps --json`, available in `datatrail-cli>=0.11.0`. It
+verifies candidate files with CADC metadata, writes a persistent inventory,
+and later fetches units with CADC. The adapter in
+`src/datatrawl/plugins/sources/_datatrail.py` is the single boundary between
+datatrawl and Datatrail.
 
 ## Registering and loading
 
