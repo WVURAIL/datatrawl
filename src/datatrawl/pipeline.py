@@ -6,7 +6,7 @@ Unit in a selection it:
 
     fetch (downloader thread(s) stage files onto scratch)
     read  (Reader -> iterable of arrays)
-    reduce(Analyzer.consume_file accumulates)
+    analyze (Analyzer.consume_file accumulates)
     delete the staged file immediately
     checkpoint the Analyzer's product every N files (atomic, via the analyzer)
 
@@ -15,7 +15,7 @@ disk at once, enforced across all downloader threads (a slot is freed only after
 the consumer deletes the file). The default (`max_staged_files=1`,
 `download_workers=1`) holds exactly one file at a time, in source order. Raising
 either trades scratch (bounded at max_staged_files x largest file) and ordering
-for download/reduce overlap; with >1 worker the analyzer sees files in
+for download/analyze overlap; with >1 worker the analyzer sees files in
 completion order, so an analyzer that needs source order must run with the default.
 
 Restartable: on restart the analyzer re-loads its product, reports which units it

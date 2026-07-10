@@ -11,7 +11,7 @@ Coverage map (review finding -> tests):
   #2 unique scratch names      -> test_stage_name_unique , test_duplicate_basenames_*
   #3 resume compatibility      -> test_resume_rejects_{freq_id,nfft,nyquist_zone} , _accepts_match
   #4 capped != complete        -> test_resume_rejects_cap_change
-  #5 reduction order           -> test_default_delivers_source_order
+  #5 analysis order            -> test_default_delivers_source_order
   #7 local freq_id selection   -> test_local_source_44_not_844 , _duplicate_basenames_*
   #8 doctor readiness          -> test_geometry_only_telescope_not_archive_ready
   #9 failure boundary          -> test_reader_iteration_failure_quarantines_and_aborts,
@@ -76,10 +76,12 @@ def _build_product(work, freq_id=844, n_files=1, cap=None):
     for k in range(n_files):
         make_synth_file(os.path.join(lib, f"baseband_b{k}_{freq_id}.h5"),
                         6 * NFFT, 16, fcen / 1e6, F_TONE_BB, seed=k + 1)
-    src, rdr, red = LocalDirectorySource(), ChimeBasebandReader(), PowerSpectrumAnalyzer()
+    src = LocalDirectorySource()
+    rdr = ChimeBasebandReader()
+    analyzer = PowerSpectrumAnalyzer()
     ctx = _chime_ctx(lib, freq_id, cap=cap)
     units = list(src.enumerate(ctx))
-    pipeline.run(source=src, reader=rdr, analyzer=red, units=units, out_path=out,
+    pipeline.run(source=src, reader=rdr, analyzer=analyzer, units=units, out_path=out,
                  tmp_dir=tmp, ctx=ctx, max_frames_per_file=cap, verbose=False)
     return out
 
@@ -286,7 +288,7 @@ def test_staged_file_bound_respects_max_staged_files():
 
 
 # ---------------------------------------------------------------------------
-# #5  reduction order under the default
+# #5  analysis order under the default
 # ---------------------------------------------------------------------------
 def test_default_delivers_source_order_even_if_later_file_is_faster():
     work = _tmp("order")
@@ -296,12 +298,12 @@ def test_default_delivers_source_order_even_if_later_file_is_faster():
     u2 = Unit(key="k2", name="f2_844.h5", meta={"f_center_hz": fcen})
     # u1 is slow, u2 is fast -- under the default (1 worker) u1 still arrives first.
     src = _FakeSynthSource(fcen, n_frames=2, delay_keys={"k1"})
-    red = _RecordingAnalyzer()
+    analyzer = _RecordingAnalyzer()
     ctx = RunContext(instrument=inst, selection=[844], options={})
     out = os.path.join(work, "o.npz"); tmp = os.path.join(work, "tmp")
-    pipeline.run(source=src, reader=ChimeBasebandReader(), analyzer=red,
+    pipeline.run(source=src, reader=ChimeBasebandReader(), analyzer=analyzer,
                  units=[u1, u2], out_path=out, tmp_dir=tmp, ctx=ctx, verbose=False)
-    assert red.order == ["k1", "k2"]
+    assert analyzer.order == ["k1", "k2"]
 
 
 # ---------------------------------------------------------------------------

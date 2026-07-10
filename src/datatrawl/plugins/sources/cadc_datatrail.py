@@ -511,7 +511,10 @@ class CadcDatatrailSource(DataSource):
         Two phases, resumable and incremental: enumerate the unique events under
         each scope (cached), then for every not-yet-done event resolve its Common
         Path and cadcinfo each requested freq_id, writing verified rows atomically
-        per event. Re-running tops up new events without re-surveying.
+        per event. Re-running tops up remaining cached events without
+        re-surveying completed ones. Use `--re-enumerate` to discover newly
+        registered events; use a fresh inventory to re-probe an already
+        completed event.
         """
         o = ctx.options or {}
         scope_opt = o.get("scope")

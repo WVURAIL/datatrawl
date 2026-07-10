@@ -9,7 +9,7 @@ almost always **re-run the same command**.
 
 - **Bounded staged files.** At the defaults, the engine stages and analyzes one
   file at a time, then deletes the staged copy. If you raise
-  `--max-staged-files`, the source may prefetch up to that explicit limit;
+  `--max-staged-files`, the engine may prefetch up to that explicit limit;
   every staged copy is deleted after it is consumed. Your archive data is
   never touched.
 - **Independent products when the analyzer fans out.** The built-in `spectrum`
@@ -71,6 +71,8 @@ or inside `tmux new -s trawl` (detach `Ctrl-b d`, reattach `tmux attach -t trawl
 At the defaults, steady-state scratch use is approximately one staged file. If
 you raise `--max-staged-files`, allow room for up to that many files. For long
 runs, point `--tmp-dir` at fast node-local scratch (`/scratch/...`), not `/arc`.
+Automatically chosen scratch directories are unique per invocation. An explicit
+`--tmp-dir` is used as-is, so concurrent scans must use distinct paths.
 Without `--tmp-dir`, datatrawl creates a unique directory under
 `DATATRAWL_TMPDIR`, writable `/scratch`, or the OS temp directory and removes it
 at exit. A hard kill can leave that invocation directory behind; it is scratch
@@ -87,7 +89,7 @@ bad, so re-fetching usually won't help. datatrawl records it in a
 source/reader-scoped ledger under
 `results/<telescope>/quarantine/<source>--<reader>.jsonl` and excludes that stable
 unit identity from future runs. Files with the same basename but different source
-identities remain independent. A probe failure occurs before reduction and can
+identities remain independent. A probe failure occurs before analysis and can
 be skipped immediately. A streaming read
 failure may happen after the analyzer has accumulated partial in-memory state, so
 datatrawl records the quarantine and aborts without checkpointing; rerun the same
@@ -105,7 +107,7 @@ analyzer and rerun the same command; resume starts from the last completed check
 ### Are duplicates a problem?
 No -- they're ruled out at three layers: `survey` dedups by physical `cadc:` URI,
 the source dedups again while enumerating, and resume skips anything already in a
-product. A file is fetched and reduced at most once even if it appears in several
+product. A file is fetched and analyzed at most once even if it appears in several
 scopes.
 
 ### `error: <product> was built with <param>=... but this run uses ...`
@@ -116,8 +118,11 @@ not mix incompatible runs; write the new run to a fresh `--out` (or remove the
 smoke-test product if it is no longer needed).
 
 ### New data landed since you surveyed
-Re-run `survey` to refresh the inventory, then scan -- files already in your
-products are skipped, only new ones are pulled.
+To discover newly registered events, re-run the original `survey` command with
+`--re-enumerate`, then scan; files already recorded in the product are skipped.
+If files were added to an event already recorded in `surveyed_events.txt`, build
+a fresh inventory with a new `--name`, because completed events are not
+re-probed in place.
 
 ### `scan` prints "nothing to do"
 That product already holds every file for the selection. To rebuild, delete the

@@ -260,12 +260,12 @@ class Datatrail:
         return [ev for name in self.children(scope, dataset)
                 for ev in _EVENT_RE.findall(name)]
 
-    # -- file listing (`datatrail ps --json`, reduced) -----------------------
+    # -- file listing (`datatrail ps --json`, normalized) --------------------
     def files(self, scope: str, dataset: str, *, retries: int = 3,
               base: float = 4.0) -> tuple:
         """(common_path, [names], ok) for one dataset's minoc files.
 
-        This is `datatrail ps <scope> <dataset> --json`, reduced to the minoc
+        This is `datatrail ps <scope> <dataset> --json`, normalized to the minoc
         replica list. Exposed here so an analyzer resolving a per-day
         companion (a gains day-dataset, say) never scrapes the Rich table or
         imports dtcli internals itself -- this adapter is chartered as the ONE
@@ -342,7 +342,7 @@ class Datatrail:
                     base: float = 4.0) -> tuple:
         """Resolve an event's CADC common path.
 
-        Same `ps --json` call as files(), reduced to the path. datatrail
+        Same `ps --json` call as files(), normalized to the path. datatrail
         derives its common path from the minoc URI list and files() replicates
         that normalization exactly, so this equals what dtcli's own
         find_dataset_common_path computed in the internal-API era -- from the

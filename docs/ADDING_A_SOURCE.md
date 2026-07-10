@@ -1,8 +1,9 @@
 # Adding a source
 
-A **source** answers *where the data lives and how to list and stage it*. You add one when
-your data is in a new place -- a different Datatrail scope with its own layout, or a
-filesystem location the shipped sources don't cover.
+A **source** answers *where the data lives and how to list and stage it*. Add one
+when the shipped sources do not cover the listing/staging policy -- for example,
+a non-event-keyed archive layout or a new filesystem convention. A new
+event-keyed Datatrail product may need only a reader.
 
 This is one of the four pluggable pieces (instrument / source / reader / analyzer); see
 [`ADDING_A_READER.md`](ADDING_A_READER.md), [`ADDING_AN_ANALYZER.md`](ADDING_AN_ANALYZER.md),
@@ -57,7 +58,7 @@ re-listing. A cheap source can leave it unimplemented and just enumerate on dema
 that a persistent survey is not implemented.
 
 Source-specific settings can be passed through `ctx.options` with repeated `--set key=value`
-arguments on `survey`, `explore`, and `doctor`.
+arguments on `doctor`, `survey`, `explore`, and `scan`.
 
 ## A different archive layout
 

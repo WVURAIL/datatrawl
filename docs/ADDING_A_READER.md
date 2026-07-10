@@ -54,16 +54,38 @@ event contributes, and what they are named. That is format knowledge, so it live
 same class that will later open the files; survey and read then share one naming
 definition and cannot drift:
 
+This survey pattern applies when the archive product is event-keyed: one event
+resolves to one common path, and the reader can name that event's expected
+files. For day-keyed, timestamped, or container-style products, build a
+discovery map first and resolve files from an analyzer or a custom source
+instead of forcing the event-survey model.
+
+The following is a complete registered skeleton. It assumes an HDF5 dataset
+named `gains`; replace that dataset contract with the one your format uses.
+
 ```python
+import h5py
+
+from datatrawl.interfaces import Reader, PluginInfo, RunContext
+from datatrawl.registry import reader as register_reader
+
+
+@register_reader
 class GainsReader(Reader):
     info = PluginInfo(name="chime-gains", kind="reader",
-                      summary="Per-event gain solutions (HDF5).")
+                      summary="Per-event gain solutions (HDF5).",
+                      instruments=("chime",))
 
-This survey pattern applies when the archive product is event-keyed: one
-event resolves to one common path, and the reader can name that event's
-expected files. For day-keyed, timestamped, or container-style products,
-build a discovery map first and resolve files from an analyzer or a custom
-source instead of forcing the event-survey model.
+    def probe(self, path):
+        # Cheap metadata only; do not read the bulk array here.
+        with h5py.File(path, "r") as f:
+            return {"kind": "gains", "shape": tuple(f["gains"].shape)}
+
+    def iter_arrays(self, path, ctx: RunContext):
+        with h5py.File(path, "r") as f:
+            gains = f["gains"]
+            for i in range(gains.shape[0]):
+                yield gains[i]
 
     def survey_files(self, event, common_path, selection, ctx):
         # (filename, fields) per candidate file. Baseband yields one per
@@ -72,9 +94,6 @@ source instead of forcing the event-survey model.
         # fine); `fields` land verbatim as columns in the inventory row.
         yield f"gains_{event}.h5", {"kind": "gains"}
 
-    def annotate_row(self, row, instrument):
-        # optional: enrich a verified row once its size is known
-        pass
 ```
 
 Then survey with it (`--plugin` loads an external module; `--scope` names where the

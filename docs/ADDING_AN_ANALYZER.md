@@ -238,10 +238,11 @@ The mechanics:
 
 Some analyses need a small companion file per unit -- calibration gains to
 beamform baseband, a flag table, an ephemeris. The engine will not stage these
-for you, deliberately: a unit is one file, staged alone and deleted after
-reduce, and that invariant is what bounds scratch and keys resume (see "Scope
-and non-goals" in the README). The supported pattern is a side-load, owned by
-the analyzer:
+for you, deliberately: a unit is one primary file, consumed independently and
+deleted after analysis. The engine may prefetch other units within the
+`--max-staged-files` bound, but it never presents them as a grouped input. That
+unit boundary keys resume (see "Scope and non-goals" in the README). The
+supported companion pattern is a side-load owned by the analyzer:
 
 1. **Build the lookup offline.** Survey each companion product into its own
    inventory (a reader shape per product -- `docs/ADDING_A_READER.md`), then
@@ -261,10 +262,10 @@ the analyzer:
    (which gain solution was applied) is a resume parameter like any other:
    stamp its identity into the product and refuse a mismatched resume.
 
-If the companion is not small -- if you need bulk data staged *alongside* every
-unit -- you are fighting the one-file-at-a-time streaming model, and the honest
-answer is a different design (pre-combine the products upstream, or a
-different tool), not a bigger side-load.
+If the companion is not small -- if every unit requires another bulk input
+alongside it -- you are fighting the one-primary-file-per-`Unit` model.
+Pre-combine the products upstream or use a different engine rather than
+enlarging the side-load.
 
 **Day-keyed archives: resolve lazily instead.** Some companion products are
 organized by DAY, not by event -- CHIME calibration gains, for instance, live

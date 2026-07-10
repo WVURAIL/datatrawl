@@ -4,7 +4,7 @@ datatrawl.interfaces -- the three swappable seams of the streaming engine.
 The engine itself (pipeline.py) is fixed: for every *unit* in a discovered
 inventory it does
 
-    fetch (stage one file)  ->  read (file -> frames)  ->  reduce (frames -> product)
+    fetch (stage one file)  ->  read (file -> frames)  ->  analyze (frames -> product)
                             ->  delete the local file   ->  checkpoint
 
 Everything telescope- or science-specific lives behind one of three interfaces
@@ -124,7 +124,7 @@ class DataSource:
 
     Implementations should make `fetch` retry transient failures and must never
     require more than one staged file to exist at a time -- the engine deletes
-    each file right after it is reduced.
+    each file right after it is analyzed.
 
     Thread-safety: with the default engine settings (download_workers=1) fetch is
     called serially, in enumerate() order. If a user raises --download-workers,

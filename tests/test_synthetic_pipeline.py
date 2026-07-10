@@ -79,11 +79,11 @@ def scan(root: str, out_path: str, tmp_dir: str, freq_id: int,
     """Run the generic engine over `root` exactly as `datatrawl scan` does."""
     src = LocalDirectorySource()
     rdr = ChimeBasebandReader()
-    red = PowerSpectrumAnalyzer()
+    analyzer = PowerSpectrumAnalyzer()
     ctx = make_ctx(root, freq_id)
     units = list(src.enumerate(ctx))
     return pipeline.run(
-        source=src, reader=rdr, analyzer=red, units=units,
+        source=src, reader=rdr, analyzer=analyzer, units=units,
         out_path=out_path, tmp_dir=tmp_dir, ctx=ctx,
         checkpoint_every=checkpoint_every, download_workers=2,
         max_files=max_files, max_frames_per_file=max_frames_per_file,
@@ -113,7 +113,7 @@ def main() -> int:
         _fail(f"expected {n_files} new / 0 failed, got {res.n_new}/{res.n_failed}")
         ok = False
 
-    # scratch must be empty: the engine deletes each staged file after reducing.
+    # scratch must be empty: the engine deletes each staged file after analysis.
     leftovers = os.listdir(tmp) if os.path.isdir(tmp) else []
     if leftovers:
         _fail(f"scratch not cleaned, leftovers: {leftovers}")

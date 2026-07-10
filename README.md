@@ -19,12 +19,13 @@ Raise `--max-staged-files` only when you explicitly want bounded prefetching.
 continues from the product's recorded unit keys.
 
 `datatrawl` is a downstream run layer for safely scanning Datatrail/CADC data
-one file at a time. Datatrail remains the archive authority: it knows which
+one primary file per unit. Datatrail remains the archive authority: it knows which
 scopes exist, which datasets are registered, what storage policies apply, and how
 a dataset resolves to files. `datatrawl` starts after that archive map exists. It
-builds an analysis-specific inventory, verifies the expected units, stages one
-file at a time, runs an analyzer, checkpoints the small product, and resumes
-after CANFAR/CADC interruptions.
+builds an analysis-specific inventory, verifies the expected units, consumes one
+unit at a time through the reader and analyzer, checkpoints the small product,
+and resumes after CANFAR/CADC interruptions. Fetching may run ahead only within
+the explicit `--max-staged-files` bound.
 
 The science itself lives in the analyzer, which is usually your own plugin kept
 in your own project.
@@ -59,7 +60,7 @@ Datatrail scope(s)
 ## The four pieces
 
 <p align="center">
-  <img src="assets/architecture.svg" alt="A datatrawl run: instrument, source, and reader are provided; you write the analyzer. The fixed engine streams each file through them and fans out one small product per channel." width="900">
+  <img src="assets/architecture.svg" alt="A datatrawl run: instrument, source, and reader are provided; you write the analyzer. The fixed engine processes one unit at a time with bounded staging and writes analyzer-defined resumable products." width="900">
 </p>
 
 | Piece | Meaning |
@@ -141,7 +142,7 @@ That `freq_id` carries a known narrowband tone, a DTV pilot, at a fixed frequenc
 If the tone shows up in the PSD, the whole path works:
 
 ```text
-survey -> inventory -> scan -> one-file staging -> reader -> analyzer
+survey -> inventory -> scan -> bounded staging -> reader -> analyzer
        -> checkpoint -> resume -> plot
 ```
 
@@ -171,7 +172,7 @@ datatrawl survey \
 # 2. Inspect the inventory without downloading bulk data.
 datatrawl explore --name chime-spectrum-844
 
-# 3. Stream + reduce a few frames from each event.
+# 3. Stream + analyze a few frames from each event.
 #    This is resumable and writes one product for freq_id 844.
 datatrawl scan \
   --name chime-spectrum-844 --analyzer spectrum --select 844 \
@@ -238,8 +239,10 @@ datatrawl scan --source local --source-root <dir> \
 Without `--tmp-dir`, each invocation receives a unique scratch directory. The
 base directory is chosen from `DATATRAWL_TMPDIR`, then a writable `/scratch`,
 then the operating system temporary directory. Pass `--tmp-dir` when a site has
-a preferred node-local scratch location. Automatically created scratch directories are removed at process exit; if a hard
-kill prevents cleanup, the leftover directory is scratch and safe to delete.
+a preferred node-local scratch location. An explicit `--tmp-dir` is used as-is,
+so concurrent scans must receive distinct paths. Automatically created scratch
+directories are removed at process exit; if a hard kill prevents cleanup, the
+leftover directory is scratch and safe to delete.
 
 By default, the local source assumes filenames contain the selected `freq_id` as
 an integer before `.h5`, for example:
@@ -264,10 +267,10 @@ Run any command with `--help` for its full options.
 |---|---|
 | **`datatrawl list`** | Show registered telescopes, sources, readers, and analyzers, including any loaded with `--plugin`. Start here to see what exists. |
 | **`datatrawl doctor`** | Readiness check. On its own, it explains the survey/scan choices and lists ready combinations. With `--telescope ... --source ... --reader ... --analyzer ...`, it gives the prerequisite checklist for one concrete pipeline. |
-| **`datatrawl survey`** | Build the run inventory: walk one or more scopes, verify expected files by metadata, omit missing ones, and cache `inventory.jsonl` + `inventory.meta.json`. It does **not** bulk-download archive data. Re-running resumes from the cache. |
+| **`datatrawl survey`** | Build the run inventory: walk one or more scopes, verify expected files by metadata, omit missing ones, and cache `inventory.jsonl` + `inventory.meta.json`. It does **not** bulk-download archive data. Re-running resumes from the cached event listing; add `--re-enumerate` to discover newly registered events. |
 | **`datatrawl survey --scopes-only`** | Recon: map the archive before committing to anything. Lists datasets across scopes (`--telescope` narrows to that telescope's live scopes; omit it to walk everything), `--match` filters by name, `--expand` opens a container one level so its children land in the map, `--name` labels the map `scopes-<name>.jsonl`. Nothing is enumerated or downloaded; every row resolves with `datatrail ps <scope> <dataset> -s`. |
 | **`datatrawl explore`** | Summarize what a source holds before scanning: freq_ids present, file counts, date span, and total volume. It works on a survey inventory or a local directory. |
-| **`datatrawl scan`** | Storage-safe run loop: stage one file to scratch, call the reader, call the analyzer, delete the staged file, and checkpoint the product atomically. Transient fetch failures retry on rerun; unreadable files are quarantined. |
+| **`datatrawl scan`** | Storage-safe run loop: stage files within the configured scratch bound, process each unit through the reader and analyzer, delete each staged copy after use, and checkpoint the product atomically. Transient fetch failures retry on rerun; unreadable files are quarantined. |
 
 To recover or extend a run, re-run the identical `scan` command.
 
@@ -276,10 +279,10 @@ To recover or extend a run, re-run the identical `scan` command.
 Knowing what datatrawl deliberately does NOT do is as useful as knowing what it
 does, so the boundary is stated here rather than discovered mid-design:
 
-* **A unit is one file.** The engine stages one file, streams it through the
-  reader into the analyzer, deletes it, checkpoints, and moves on. That
-  invariant is what bounds scratch usage and makes every run resumable, so
-  there is no mode that stages a *group* of files together.
+* **A unit is one primary file.** The reader and analyzer consume one unit at a
+  time. The engine may prefetch other independent units, but never beyond
+  `--max-staged-files`, and never presents a grouped set of primary files as one
+  unit. That unit boundary is what keys resume and quarantine.
 * **datatrawl never joins data products.** It will build you a verified
   inventory per product type (survey with the right reader shape -- see
   [`docs/ADDING_A_READER.md`](docs/ADDING_A_READER.md)), but *which* companion
@@ -297,9 +300,9 @@ does, so the boundary is stated here rather than discovered mid-design:
   `plan_runs` returns (`{"events": [...], "freq_ids": ...}`). Filters are
   ANDed and exact; nothing is inferred from the shape of a bare integer.
 
-If your workflow fits "stream verified files one at a time into a resumable
-product", datatrawl carries the archive mechanics for you. If it needs paired
-bulk staging, that is a different engine, not a missing flag.
+If your workflow fits "stream verified one-file units into a resumable product",
+datatrawl carries the archive mechanics for you. If it needs paired bulk staging
+as one unit, that is a different engine, not a missing flag.
 
 ## What Datatrail does
 
@@ -333,8 +336,9 @@ Nothing in this repository needs to change for project-specific analysis code.
 | CHIME-compatible baseband, new science product | **Analyzer only** |
 | Same files, different statistic / detector / product | **Analyzer only** |
 | Files already staged on disk | Usually **analyzer only**; use `--source local` |
-| Same telescope, new file format | **Reader + analyzer** |
-| New Datatrail scope with a different dataset/file layout | **Source**, possibly **reader**, plus **analyzer** |
+| Existing event/file shape in a new Datatrail scope | Usually **analyzer only**; reuse the source/reader and pass `--scope` |
+| Event-keyed Datatrail product with a new file shape | **Reader + analyzer**; reuse `cadc-datatrail` |
+| Non-event-keyed archive layout or different listing/staging policy | **Source**, probably **reader**, plus **analyzer** |
 | New telescope with CHIME-like files | **Instrument YAML**, possibly **analyzer** |
 | New telescope and new file format | **Instrument YAML + reader + analyzer** |
 
@@ -370,22 +374,56 @@ one-file smoke scan, rerun to verify resume), and the full contract live in
 
 ### Minimal analyzer shape
 
-An analyzer subclasses `AccumulatingAnalyzer` and implements four small methods:
+An analyzer subclasses `AccumulatingAnalyzer` and implements five small
+lifecycle hooks. This complete example accumulates mean frame power:
 
 ```python
-from datatrawl.interfaces import PluginInfo
+import numpy as np
+
+from datatrawl.interfaces import PluginInfo, RunContext
 from datatrawl.analyzer_base import AccumulatingAnalyzer
 from datatrawl.registry import analyzer as register_analyzer
 
 
 @register_analyzer
-class MyAnalyzer(AccumulatingAnalyzer):
-    info = PluginInfo(name="my-analyzer", kind="analyzer", ...)
+class MeanPowerAnalyzer(AccumulatingAnalyzer):
+    info = PluginInfo(
+        name="mean-power",
+        kind="analyzer",
+        summary="Accumulate mean power from streamed arrays.",
+        instruments=("*",),
+    )
 
-    def consume_file(self, arrays, meta): ...  # stream one staged file into state
-    def _product(self): ...                    # state -> small dict, checkpointed as .npz
-    def _restore(self, z): ...                 # inverse of _product, called on resume
-    def summary(self): ...                     # one line for the end-of-run report
+    def __init__(self):
+        super().__init__()
+        self._sum = 0.0
+        self._count = 0
+
+    def begin(self, ctx: RunContext, first_meta):
+        # Capture run metadata here if needed; never reset resumed state.
+        pass
+
+    def consume_file(self, arrays, meta):
+        n = 0
+        for array in arrays:
+            self._sum += float(np.mean(np.abs(array) ** 2))
+            self._count += 1
+            n += 1
+        self._record(meta)  # required for checkpoint/resume bookkeeping
+        return n
+
+    def _product(self):
+        return {"analysis": "mean-power", "sum": self._sum, "count": self._count}
+
+    def _restore(self, z):
+        if str(z["analysis"]) != "mean-power":
+            raise SystemExit("existing product belongs to a different analyzer")
+        self._sum = float(z["sum"])
+        self._count = int(z["count"])
+
+    def summary(self):
+        mean = self._sum / self._count if self._count else 0.0
+        return {"frames": self._count, "mean_power": mean}
 ```
 
 Parameters reach the analyzer as `ctx.options` via `--set key=value`. If an
@@ -422,8 +460,8 @@ rationale, and the CHANGELOG the migration history.
 
 ## Build documentation
 
-The formal data sheet and user guide (`docs/Datatrawl_DS001_v1_2_Data_Sheet.tex`,
-`docs/Datatrawl_UG001_v1_2_User_Guide.tex`) share the WVURAIL house style with
+The formal data sheet and user guide (`docs/Datatrawl_DS001_v1_3_Data_Sheet.tex`,
+`docs/Datatrawl_UG001_v1_3_User_Guide.tex`) share the WVURAIL house style with
 the PilotProxy documents. Generated PDFs are ignored by git. Build locally with:
 
 ```bash

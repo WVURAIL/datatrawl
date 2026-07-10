@@ -6,11 +6,11 @@ The real `cadc-datatrail` source is what we cannot exercise without CANFAR: its
 enumerate() reads an inventory.jsonl, and its fetch() pulls each file with
 cadcget (with retry + backoff). This test drives that REAL source code
 end-to-end with NO CADC access, by injecting a fake StorageInventoryClient that
-serves synthetic baseband files from a local fixture directory, then reducing
+serves synthetic baseband files from a local fixture directory, then analyzing
 them with the spectrum analyzer.
 
 It validates the integration glue that otherwise only runs on CANFAR:
-  * inventory enumeration -> per-freq_id fan-out -> stage -> reduce -> product;
+  * inventory enumeration -> per-freq_id fan-out -> stage -> analyze -> product;
   * resume (re-running is a no-op);
   * self-healing -- a freq_id whose fetches all fail is left incomplete and a
     nonzero exit is returned, then completed on a later run once the "outage"

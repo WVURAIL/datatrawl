@@ -62,6 +62,7 @@ Then confirm a concrete run:
 
 ```bash
 datatrawl doctor --telescope myscope --source local \
+                 --source-root /path/to/files \
                  --reader chime-baseband --analyzer spectrum
 ```
 

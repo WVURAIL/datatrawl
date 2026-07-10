@@ -34,6 +34,8 @@ smoke:
 docs:
 	@command -v latexmk >/dev/null || { \
 	    echo "latexmk not found -- see 'Build documentation' in README.md"; exit 1; }
+	rm -rf docs/out
+	mkdir -p docs/out
 	cd docs && for t in *.tex; do \
 	    latexmk -pdf -interaction=nonstopmode -halt-on-error -outdir=out $$t || exit 1; \
 	done
@@ -59,5 +61,5 @@ diagram:
 	done
 
 clean:
-	rm -rf build dist *.egg-info src/*.egg-info .pytest_cache results data logs
+	rm -rf build dist *.egg-info src/*.egg-info .pytest_cache results data logs docs/out assets/out
 	find . -type d -name __pycache__ -prune -exec rm -rf {} + 2>/dev/null || true

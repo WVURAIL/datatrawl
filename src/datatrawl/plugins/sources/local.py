@@ -4,7 +4,7 @@ Local-directory data source.
 For data already sitting on /arc (or anywhere on the filesystem) rather than in a
 remote archive. `enumerate` globs files for the selection; `fetch` hardlinks (or
 copies) the file into the engine's scratch dir -- so the engine's "delete after
-reduce" only ever removes the scratch link, never your original.
+analysis" only ever removes the scratch link, never your original.
 
 Two real uses:
   * collaborators whose data is staged on /arc, not pulled from CADC;

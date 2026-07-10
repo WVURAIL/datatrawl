@@ -24,6 +24,7 @@
 \usepackage{lastpage}
 \usepackage{float}
 \usepackage{placeins}
+\usepackage{needspace}
 
 \definecolor{TrawlAmber}{HTML}{A66A00}
 \definecolor{TrawlGray}{HTML}{555555}
@@ -82,7 +83,7 @@
 \fancyhead[L]{\small Datatrawl-UG001}
 \fancyhead[C]{\small Storage-Safe Archive Trawling Engine v1.0.0}
 \fancyhead[R]{\small User Guide}
-\fancyfoot[L]{\small Datatrawl-UG001 v1.2}
+\fancyfoot[L]{\small Datatrawl-UG001 v1.3}
 \fancyfoot[C]{\small West Virginia University}
 \fancyfoot[R]{\small Page \thepage\ of \pageref{LastPage}}
 \renewcommand{\headrulewidth}{0.8pt}
@@ -92,14 +93,20 @@
 
 \title{datatrawl Storage-Safe Archive Trawling Engine v1.0.0\\User Guide}
 \author{West Virginia University}
-\date{Datatrawl-UG001 v1.2 \\ July 3, 2026}
+\date{Datatrawl-UG001 v1.3 \\ July 10, 2026}
+\hypersetup{
+  pdftitle={datatrawl Storage-Safe Archive Trawling Engine v1.0.0 -- User Guide},
+  pdfauthor={West Virginia University Radio Astronomy Instrumentation Lab (RAIL)},
+  pdfsubject={Datatrawl-UG001 v1.3},
+  pdfkeywords={datatrawl, radio astronomy, archive analysis, user guide}
+}
 
 \begin{document}
 \thispagestyle{fancy}
 {\sffamily
 \begin{minipage}[t]{0.39\textwidth}
   {\fontsize{24}{26}\selectfont\bfseries\color{TrawlAmber}datatrawl}\par
-  {\small Datatrawl-UG001 v1.2, July 3, 2026}
+  {\small Datatrawl-UG001 v1.3, July 10, 2026}
 \end{minipage}%
 \begin{minipage}[t]{0.61\textwidth}
   \raggedleft
@@ -113,14 +120,15 @@
 \vspace{8pt}
 
 \section{The Model in One Paragraph}
-Every datatrawl run is four choices: a \textbf{telescope} (geometry and
+Every complete scan pipeline combines four choices: a \textbf{telescope} (geometry and
 metadata), a \textbf{source} (where files come from), a \textbf{reader} (how
-one file becomes arrays), and an \textbf{analyzer} (the science). The engine
-then processes the archive one file at a time --- fetch, analyze, delete,
-checkpoint --- while optionally maintaining an explicitly bounded prefetch
-queue. The analyzer may split a selection into one or more independently
-resumable products. \code{datatrawl doctor} exists to make the four choices
-and their prerequisites legible \emph{before} you spend hours on a scan.
+one primary file becomes arrays), and an \textbf{analyzer} (the science). The
+engine consumes one unit at a time --- fetch, analyze, delete, checkpoint ---
+while optionally prefetching other independent units within an explicit
+staged-file-count bound. The analyzer may split a selection into one or more
+independently resumable products. \code{datatrawl doctor} exists to make the
+four choices and their prerequisites legible \emph{before} you spend hours on
+a scan.
 
 \section{Installation}
 \begin{lstlisting}
@@ -135,9 +143,10 @@ pip install -e ".[dev,examples]"   # offline/local development
 datatrawl --version
 pytest -q
 \end{lstlisting}
-Optional extras: \code{[cadc]} for CADC fetch, \code{[survey]} for Datatrail
-inventory builds, \code{[gpu]} for GPU analyzers (CuPy is installed separately
---- see \S\ref{sec:cupy}).
+Optional extras: \code{[cadc]} for CADC fetching from an existing inventory;
+\code{[survey]} for inventory construction (it includes the CADC clients and
+\code{datatrail-cli>=0.11.0}); \code{[gpu]} declares no pinned package because
+CuPy must match the session image (see \S\ref{sec:cupy}).
 
 \section{Discovering What Is Available}
 \begin{lstlisting}
@@ -188,11 +197,17 @@ split is spelled out in \code{docs/DATATRAIL_BOUNDARY.md}.}
 the telescope, source, and reader choices inside the inventory so later scans
 need only the analyzer:
 \begin{lstlisting}
-datatrawl explore --telescope chime --source cadc-datatrail   # look, no download
-datatrawl survey  --telescope chime --source cadc-datatrail   # -> data/chime.../
+datatrawl survey \
+  --telescope chime --source cadc-datatrail \
+  --scope chime.event.baseband.raw \
+  --freq-ids 844 --max-events 5 --name chime-spectrum-844
+
+datatrawl explore --name chime-spectrum-844
 \end{lstlisting}
-Inventories stream from disk during a scan; the engine never needs the whole
-archive listing in memory.
+This first survey is deliberately bounded and does not bulk-download data.
+Inventories persist on disk between commands. During a scan, the current engine
+loads the units selected for each product into memory before staging begins, so
+memory use grows with the number of selected rows.
 
 The reader also owns the \emph{archive file shape}: which files one event
 contributes and what they are named (\field{Reader.survey_files}). Survey
@@ -204,8 +219,13 @@ product becomes surveyable by loading a small external shape reader with
 
 \section{Running a Scan}
 \begin{lstlisting}
-datatrawl scan --name chime --analyzer spectrum --select 614,706
+datatrawl scan \
+  --name chime-spectrum-844 --analyzer spectrum --select 844 \
+  --max-frames-per-file 5
 \end{lstlisting}
+This smoke-test product is intentionally capped. Remove the cap only with a
+fresh \code{--out} or after deleting the capped product; datatrawl refuses to
+mix capped and uncapped runs.
 \begin{itemize}
   \item \code{--select} is interpreted by the analyzer. For the spectrum
         analyzer: explicit \field{freq_id}s such as \code{844},
@@ -214,25 +234,28 @@ datatrawl scan --name chime --analyzer spectrum --select 614,706
         \field{plan_runs} may return the dict form
         \code{{"events": [...], "freq_ids": ...}}; filters are exact and
         ANDed, and a malformed selection fails with the grammar named, not a
-        traceback. A multi-item selection becomes independent products that
-        resume and fail independently.
+        traceback. The analyzer's \field{plan_runs} decides product fan-out;
+        the built-in spectrum analyzer creates one independent product per
+        selected \field{freq_id}.
   \item \code{--checkpoint-every N} (default 50) sets how many files may need
         re-processing after a kill; each checkpoint is an atomic full-product
         save.
-  \item \code{--download-workers} / \code{--max-staged-files} parallelize
-        \emph{fetch only}; the engine refuses values above 1 for analyzers
-        that declare \field{requires_in_order}.
+  \item \code{--download-workers} controls concurrent fetch calls;
+        \code{--max-staged-files} caps fetched or in-progress files on scratch
+        and permits fetch/analyze overlap. Analyzer calls remain serial on the
+        engine's main thread. The engine refuses either value above 1 when the
+        analyzer declares \field{requires_in_order}.
   \item \code{--plugin yourpkg.module} loads an external plugin explicitly;
         installed packages advertising the \code{datatrawl.plugins}
         entry-point group are found automatically.
 \end{itemize}
 
-\importantbox{Storage safety is the point: at the defaults, at most one staged
-file exists at a time. If \code{--max-staged-files} is raised, no more than
-that explicitly configured number may be staged. The copies live in a
-per-invocation staging directory (concurrent scans cannot delete each other's
-files), and each is deleted as soon as the analyzer has consumed it. Do not
-point the staging area at precious data.}
+\importantbox{At the defaults, at most one staged or in-progress file exists.
+If \code{--max-staged-files} is raised, no more than that configured number is
+staged. Without \code{--tmp-dir}, each invocation receives a unique staging
+directory. An explicit \code{--tmp-dir} is used as-is, so concurrent scans must
+receive distinct paths. Each staged file is deleted after consumption; never
+point a staging directory at precious data.}
 
 \section{Kill and Resume}
 A scan may be killed at any instant --- session timeout, preemption,
@@ -245,9 +268,12 @@ against an \emph{incompatible} existing product is refused with an explicit
 error rather than silently mixing two configurations; use a clean output
 location to rebuild.
 
+\Needspace{7\baselineskip}
 \section{CANFAR / CADC Notes}
-On a CANFAR session: install with the \code{[cadc]} (and, for inventory
-builds, \code{[survey]}) extras, ensure a valid CADC proxy certificate, and
+On a CANFAR session, install with \code{[survey]} when building inventories;
+it already includes the CADC clients. Use \code{[cadc]} alone only when
+scanning an existing inventory without Datatrail discovery. Ensure a valid
+CADC proxy certificate, and
 let \code{datatrawl doctor --source cadc-datatrail ...} confirm credentials
 and the Datatrail contract before launching. Datatrail remains the archive
 authority --- datatrawl only reads; the boundary is specified in
@@ -262,8 +288,11 @@ it is not pinned as a dependency. On a GPU node:
 datatrawl setup-cupy            # report the image's CUDA + the matching wheel
 datatrawl setup-cupy --install  # install cupy-cudaXXx into the active venv
 \end{lstlisting}
-CPU-only environments need nothing; the built-in analyzers fall back to
-NumPy with identical arithmetic.
+Without \code{--gpu}, the built-in spectrum analyzer uses NumPy and requires no
+CuPy. With \code{--gpu}, CuPy is required; if it is not importable, the scan
+stops with an instruction to run \code{datatrawl setup-cupy --install}. The CPU
+and GPU paths implement the same algorithm but may differ at floating-point
+roundoff.
 
 \section{Writing an Analyzer}
 The analyzer owns its product file. Implement the lifecycle and register it:
@@ -306,10 +335,11 @@ the lookup later disagrees. Day-keyed companion archives resolve lazily with
 
 \importantbox{If your product depends on the order files are consumed --- a
 running or trailing statistic, a CFAR baseline --- set
-\field{requires_in_order = True}. The engine will then refuse the parallel
-settings that deliver files in download-completion order, turning a silent
-wrong answer into a loud configuration error.}
+\field{requires_in_order = True}. The engine enforces that contract by refusing
+either parallel/prefetch setting above 1, so an order-dependent analyzer must
+use both defaults.}
 
+\Needspace{0.20\textheight}
 \section{Troubleshooting}
 \begin{tabularx}{\linewidth}{L{0.34\linewidth} Y}
 \toprule
@@ -333,6 +363,7 @@ interfaces); the \code{docs/ADDING_*.md} extension guides;
 \code{docs/DATATRAIL_BOUNDARY.md}; and, for the RAIL detector built on this
 engine, \textbf{PilotProxy-DS001/UG001}.
 
+\Needspace{0.24\textheight}
 \section{Revision History}
 \begin{tabularx}{\linewidth}{L{0.12\linewidth} L{0.20\linewidth} Y}
 \toprule
@@ -343,10 +374,14 @@ v1.1 & July 3, 2026 & Engine v0.2.0: recon (\code{--scopes-only} with
 \code{--match}/\code{--expand}/\code{--name}, telescope-scoped), event
 selection grammar, reader-owned archive file shape (\code{survey --reader}),
 \code{DATATRAIL.files()}, per-event fan-out and companion patterns. \\
-v1.2 & July 3, 2026 & Version designation: engine v0.2.0 re-tagged v1.0.0
+v1.2 & July 3, 2026 & Version designation: engine v0.2.0 redesignated v1.0.0
 under the 1.0 stability contract (public CLI, plugin contracts,
 product/inventory formats); no functional changes. External analyzer example
 moved to the \code{datatrawl-analyzer-template} repository. \\
+v1.3 & July 10, 2026 & Documentation corrections: bounded prefetch and
+scratch isolation, selection-sized inventory memory, analyzer-owned
+provenance and resume requirements, GPU behavior, survey dependencies,
+pagination, and PDF metadata; no engine behavior changes. \\
 \bottomrule
 \end{tabularx}
 

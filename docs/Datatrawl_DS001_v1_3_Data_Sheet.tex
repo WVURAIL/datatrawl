@@ -24,6 +24,7 @@
 \usepackage{lastpage}
 \usepackage{float}
 \usepackage{placeins}
+\usepackage{needspace}
 
 % WVURAIL house palette: shared neutrals, per-project accent.
 % PilotProxy uses FStatRed (A00000); datatrawl uses TrawlAmber.
@@ -88,7 +89,7 @@
 \fancyhead[L]{\small Datatrawl-DS001}
 \fancyhead[C]{\small Storage-Safe Archive Trawling Engine v1.0.0}
 \fancyhead[R]{\small Product Specification}
-\fancyfoot[L]{\small Datatrawl-DS001 v1.2}
+\fancyfoot[L]{\small Datatrawl-DS001 v1.3}
 \fancyfoot[C]{\small West Virginia University}
 \fancyfoot[R]{\small Page \thepage\ of \pageref{LastPage}}
 \renewcommand{\headrulewidth}{0.8pt}
@@ -98,14 +99,20 @@
 
 \title{datatrawl Storage-Safe Archive Trawling Engine v1.0.0\\Product Specification}
 \author{West Virginia University}
-\date{Datatrawl-DS001 v1.2 \\ July 3, 2026}
+\date{Datatrawl-DS001 v1.3 \\ July 10, 2026}
+\hypersetup{
+  pdftitle={datatrawl Storage-Safe Archive Trawling Engine v1.0.0 -- Product Specification},
+  pdfauthor={West Virginia University Radio Astronomy Instrumentation Lab (RAIL)},
+  pdfsubject={Datatrawl-DS001 v1.3},
+  pdfkeywords={datatrawl, radio astronomy, archive analysis, resumable processing}
+}
 
 \begin{document}
 \thispagestyle{fancy}
 {\sffamily
 \begin{minipage}[t]{0.39\textwidth}
   {\fontsize{24}{26}\selectfont\bfseries\color{TrawlAmber}datatrawl}\par
-  {\small Datatrawl-DS001 v1.2, July 3, 2026}
+  {\small Datatrawl-DS001 v1.3, July 10, 2026}
 \end{minipage}%
 \begin{minipage}[t]{0.61\textwidth}
   \raggedleft
@@ -121,16 +128,17 @@
 {\small\color{TrawlGray}This product specification defines the v1.0.0 streaming
 engine contract. datatrawl is a downstream run layer: the archive authority
 (e.g.\ Datatrail/CADC) remains the source of record for what data exists;
-datatrawl fetches, streams, and deletes copies under a fixed storage budget.
+datatrawl fetches, streams, and deletes copies under an explicit staged-file-count
+bound.
 Throughput is source-, network-, and analyzer-dependent and should be measured
 on the target system.}
 
 \section{Features}
 \begin{itemize}
-  \item Streams telescope archives under an explicit, fixed
-        \textbf{local-storage budget}: by default, stage and analyze one file
-        at a time; optionally prefetch up to \code{--max-staged-files}; delete
-        every staged copy after consumption.
+  \item Streams telescope archives under an explicit
+        \textbf{staged-file-count bound}: by default, stage and analyze one
+        file at a time; optionally prefetch up to
+        \code{--max-staged-files}; delete every staged copy after consumption.
   \item \textbf{Resumable products}: the analyzer owns its product file,
         re-loads it on restart, and skips already-accumulated units; a
         kill at any point loses at most the work since the last checkpoint.
@@ -145,9 +153,11 @@ on the target system.}
   \item \textbf{Ordering contract}: analyzers declare
         \field{requires_in_order}; the engine refuses parallel-fetch settings
         that would deliver files out of source order to such analyzers.
-  \item Memory-bound inventories: \code{datatrawl survey} writes a named
-        inventory directory recording the telescope/source/reader choices, so
-        \code{datatrawl scan} needs only the analyzer and the inventory name.
+  \item \textbf{Persistent inventories}: \code{datatrawl survey} writes a
+        named inventory directory recording the telescope/source/reader
+        choices, so \code{datatrawl scan} needs only the analyzer and the
+        inventory name. Current scans load the units selected for each product
+        into memory before staging begins.
   \item \textbf{Selection}: \field{freq_id}s and/or events, one grammar
         across sources --- \code{614,706}, \code{506-844},
         \code{events:349382977}, or the dict form a \field{plan_runs}
@@ -163,9 +173,9 @@ on the target system.}
         inventory rows are self-describing (each records its file
         \field{name}), so a scan stages exactly what the survey verified.
   \item Atomic product writes (temporary file in the product directory, then
-        atomic replace), per-invocation staging directories (concurrent scans
-        cannot delete each other's files), and unit-key provenance embedded
-        in every product.
+        atomic replace), unique automatically created staging directories
+        (concurrent scans using the defaults cannot delete each other's
+        files), and analyzer-owned unit-key provenance.
   \item Pure-Python core (\code{numpy}, \code{h5py}, \code{pyyaml});
         CANFAR/CADC access and GPU acceleration are optional extras.
 \end{itemize}
@@ -173,10 +183,11 @@ on the target system.}
 \section{What datatrawl Is and Is Not}
 \begin{tabularx}{\linewidth}{L{0.30\linewidth} Y}
 \toprule
-\textbf{Is} & A run layer that walks an archive inventory, processes one file
-              at a time, hands its arrays to a science analyzer, saves a
-              resumable product, and deletes each staged copy after use. The
-              source may maintain an explicitly bounded prefetch queue. \\
+\textbf{Is} & A run layer that walks an archive inventory, analyzes one staged
+              file at a time, hands its arrays to a science analyzer, saves a
+              resumable product, and deletes the staged copy after use. The
+              engine may overlap that serial consumption with an explicitly
+              bounded fetch queue. \\
 \textbf{Is} & A contract between an engine and plugins: lifecycle, ordering,
               resume, and provenance rules that make long unattended runs
               safe. \\
@@ -201,16 +212,22 @@ on the target system.}
                   minimum height=0.85cm,text width=3.0cm,align=center]
 \node[soft] (arch) {Archive authority\\{\scriptsize Datatrail / CADC / local}};
 \node[blk,right=of arch] (src) {Source plugin\\{\scriptsize enumerate / fetch}};
-\node[blk,right=of src] (rdr) {Reader plugin\\{\scriptsize probe / iter\_arrays}};
+\node[soft,below=of src] (stage)
+  {Staging dir\\{\scriptsize bounded queue; deleted after use}};
+\node[blk,right=of stage] (rdr)
+  {Reader plugin\\{\scriptsize probe / iter\_arrays}};
 \node[blk,right=of rdr] (ana) {Analyzer plugin\\{\scriptsize consume\_file}};
 \node[soft,below=of ana] (prod) {Resumable product\\{\scriptsize .npz + provenance}};
-\node[soft,below=of src] (stage) {Staging dir\\{\scriptsize bounded queue; deleted after use}};
 \draw[->,thick] (arch) -- (src);
-\draw[->,thick] (src) -- (rdr);
-\draw[->,thick] (rdr) -- (ana);
-\draw[->,thick] (ana) -- node[right,font=\scriptsize]{checkpoint every $N$} (prod);
 \draw[->,thick] (src) -- (stage);
-\draw[->,thick,dashed] (prod) to[bend left=18] node[above,font=\scriptsize]{resume} (ana);
+\draw[->,thick] (stage) -- (rdr);
+\draw[->,thick] (rdr) -- (ana);
+\draw[->,thick]
+  (ana.south west) to[bend right=18]
+  node[left,font=\scriptsize]{checkpoint every $N$} (prod.north west);
+\draw[->,thick,dashed]
+  (prod.north east) to[bend right=18]
+  node[right,font=\scriptsize]{resume} (ana.south east);
 \end{tikzpicture}
 \caption{Bounded streaming loop. The engine drives the lifecycle; plugins own
 archive access, file decoding, and science.}
@@ -223,24 +240,33 @@ archive access, file decoding, and science.}
 \midrule
 Staged files on disk & 1 (default) & \code{--max-staged-files} raises the
 prefetch depth; refused when the analyzer sets \field{requires_in_order}. \\
+Staged-input footprint & Approximately $N S_{\max}$ & $N$ is
+\code{--max-staged-files} and $S_{\max}$ is the largest selected file;
+product-checkpoint temporary space and filesystem overhead are additional. \\
 Download workers & 1 (default) & \code{--download-workers} parallelizes fetch
 only; all accumulator writes stay on the engine's main thread (no analyzer
 locking). Refused for in-order analyzers. \\
 Checkpoint interval & 50 files & \code{--checkpoint-every}; each checkpoint is
 an atomic \code{save()} of the full product. \\
-Delivery order & Source order & Guaranteed at the defaults; completion order
-otherwise. In-order analyzers can only run at the defaults. \\
-Staging directory & Per invocation & Unique path per scan; concurrent scans
-cannot delete each other's staged files. \\
-Product write & Atomic & a temporary file in the product directory, then atomic replace; a kill never leaves
-a partial product. \\
+Delivery order & Source order & Guaranteed when
+\code{--download-workers=1} and \code{--max-staged-files=1}. With relaxed
+settings, delivery order is not part of the public contract and may follow
+fetch completion. \\
+Staging directory & Unique when automatic & Without \code{--tmp-dir}, each
+scan receives a unique directory under \code{DATATRAWL_TMPDIR}, writable
+\code{/scratch}, or the operating-system temporary directory. An explicit
+\code{--tmp-dir} is used as-is and must not be shared by concurrent scans. \\
+Product write & Atomic & A temporary file in the product directory atomically
+replaces the prior checkpoint; a kill never leaves a partial product. \\
 Resume gate & Strict & \field{resume()} must raise on an existing but
 incompatible product; two configurations can never mix into one file. \\
-Inventory memory & Bounded & Inventory records stream from disk; the engine
-never holds the full archive listing in memory. \\
+Inventory memory & Selection-sized & Inventory rows persist on disk between
+commands, but \code{scan} materializes the units selected for each product in
+memory before processing. Memory use grows with the selected inventory. \\
 \bottomrule
 \end{tabularx}
 
+\Needspace{0.32\textheight}
 \section{Command Surface}
 \begin{tabularx}{\linewidth}{L{0.28\linewidth} Y}
 \toprule
@@ -251,8 +277,8 @@ never holds the full archive listing in memory. \\
 \code{datatrawl doctor} & Startup checklist and ready-to-go combinations; with
 \code{--telescope/--source/--reader/--analyzer}, the checklist for one chosen
 combination. \\
-\code{datatrawl explore} & Report what data is available for a source
-(no download). \\
+\code{datatrawl explore} & Summarize an existing archive inventory or a local
+directory (no staging or bulk download). \\
 \code{datatrawl survey} & Walk the archive to build a named inventory
 directory; records telescope, source, and reader. With \code{--scopes-only},
 recon: map scopes and datasets (\code{--match}, \code{--expand},
@@ -261,7 +287,8 @@ recon: map scopes and datasets (\code{--match}, \code{--expand},
 (\code{--name}/\code{--inventory}), with \code{--select} interpreted by the
 analyzer. \\
 \code{datatrawl setup-cupy} & Detect the session image's CUDA version and
-install the matching \code{cupy-cudaXXx} wheel. \\
+report the matching \code{cupy-cudaXXx} wheel; add \code{--install} to install
+that wheel into the active environment. \\
 \code{datatrawl --version} & Package and runtime report the same version. \\
 \bottomrule
 \end{tabularx}
@@ -292,11 +319,13 @@ silently consume files in download-completion order.}
 \begin{itemize}
   \item \textbf{Source}: \field{enumerate(ctx)} yields \field{Unit}s;
         \field{fetch(unit, dest)} stages one file; \field{survey(ctx, out)}
-        builds an inventory; \field{preflight(ctx)} verifies credentials and
-        connectivity before the run starts.
+        builds an inventory; \field{preflight(ctx)} lets \code{datatrawl
+        doctor} verify credentials and connectivity before the user starts a
+        run.
   \item \textbf{Reader}: \field{probe(path)} returns file metadata;
         \field{iter_arrays(path, ctx)} streams decode-ready arrays;
-        \field{preflight(ctx)} verifies decode prerequisites. Optionally,
+        \field{preflight(ctx)} lets \code{datatrawl doctor} verify decode
+        prerequisites. Optionally,
         \field{survey_files(event, common_path, selection, ctx)} declares the
         archive file shape for surveys, and \field{annotate_row} enriches
         verified inventory rows.
@@ -314,11 +343,13 @@ package registers its \code{chime-baseband-packed} reader and its detector
 analyzers this way.
 
 \section{Provenance and Resume Semantics}
-Every product embeds the \field{Unit.key} values it accumulated, the source
-event keys derived from them, and the run configuration needed to refuse an
-incompatible resume. A resumed run: (1) loads the product, (2) skips every
-enumerated unit whose key is already present, (3) continues accumulating, and
-(4) checkpoints atomically. The failure guarantee is therefore: \textbf{a kill
+Each analyzer owns its product and resume contract. It must persist every
+\field{Unit.key} it has committed and every parameter or invariant that changes
+the product's meaning; \field{resume()} must reject an incompatible existing
+product. The supplied accumulating base class and spectrum analyzer implement
+this contract for their supported fields. The engine obtains committed keys
+through \field{processed_keys()}, skips matching units, continues accumulation,
+and checkpoints atomically. The failure guarantee is therefore: \textbf{a kill
 at any instant loses at most the files consumed since the last checkpoint, and
 never corrupts the product}.
 
@@ -330,8 +361,8 @@ never corrupts the product}.
 (core) & \code{numpy}, \code{h5py}, \code{pyyaml} & Engine, instruments,
 built-in reader/analyzer. \\
 \code{[cadc]} & \code{cadcdata}, \code{cadcutils} & CADC fetch path. \\
-\code{[survey]} & Datatrail CLI contract & \code{datatrawl survey} inventory
-builds. \\
+\code{[survey]} & \code{cadcdata}, \code{cadcutils},
+\code{datatrail-cli>=0.11.0} & Datatrail inventory builds and CADC fetch. \\
 \code{[gpu]} & (none pinned) & GPU analyzers; CuPy is installed to match the
 image's CUDA via \code{datatrawl setup-cupy --install}. \\
 \code{[dev]} & \code{pytest}, \code{build}, \code{twine} & Test and release
@@ -369,6 +400,7 @@ Python $\geq$ 3.9. Continuous integration runs the full suite on CPython
         this engine.
 \end{itemize}
 
+\Needspace{0.24\textheight}
 \section{Revision History}
 \begin{tabularx}{\linewidth}{L{0.12\linewidth} L{0.20\linewidth} Y}
 \toprule
@@ -379,10 +411,14 @@ v1.1 & July 3, 2026 & Engine v0.2.0: recon (\code{--scopes-only} with
 \code{--match}/\code{--expand}/\code{--name}, telescope-scoped), event
 selection grammar, reader-owned archive file shape (\code{survey --reader}),
 \code{DATATRAIL.files()}, per-event fan-out and companion patterns. \\
-v1.2 & July 3, 2026 & Version designation: engine v0.2.0 re-tagged v1.0.0
+v1.2 & July 3, 2026 & Version designation: engine v0.2.0 redesignated v1.0.0
 under the 1.0 stability contract (public CLI, plugin contracts,
 product/inventory formats); no functional changes. External analyzer example
 moved to the \code{datatrawl-analyzer-template} repository. \\
+v1.3 & July 10, 2026 & Documentation corrections: bounded prefetch and
+scratch isolation, selection-sized inventory memory, analyzer-owned
+provenance and resume requirements, GPU behavior, survey dependencies,
+system diagram, pagination, and PDF metadata; no engine behavior changes. \\
 \bottomrule
 \end{tabularx}
 

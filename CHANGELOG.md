@@ -9,6 +9,14 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Changed
 
+- Documentation follow-up from an external-user walkthrough: repaired the
+  reader extension example; aligned bounded-prefetch terminology across the
+  README, troubleshooting guide, analyzer guide, CLI help, and architecture
+  graphic; distinguished reader-only event-keyed products from layouts that
+  need a new source; corrected new-event survey recovery to require
+  `--re-enumerate`; and rolled DS001/UG001 to v1.3 with accurate memory,
+  scratch-isolation, provenance, GPU, dependency, diagram, pagination, and PDF
+  metadata contracts. No engine behavior changed.
 - CLI: quarantine default-path help text corrected to the real default,
   results/<tel>/quarantine/<source>--<reader>.jsonl. Credit: external review.
 - The `cadc-datatrail` source now drives Datatrail through the CLI's
@@ -86,7 +94,7 @@ its planned replacement is the `UPSTREAM NOTE` in `_datatrail.py`.
   README "Quick path" now leads with the template, and a new `template-smoke`
   CI job runs the template's suite against the datatrawl checkout under test,
   so a datatrawl change that breaks the template fails on the datatrawl side.
-- DS001/UG001 rolled to v1.2: version designation for the 1.0.0 tag; no
+- DS001/UG001 rolled to v1.2: documentation for the 1.0.0 release designation; no
   engine changes documented.
 
 ## [0.2.0] - 2026-07-03
@@ -190,6 +198,7 @@ its planned replacement is the `UPSTREAM NOTE` in `_datatrail.py`.
 - External plugin loading by file, module, environment variable, or entry point.
 - Quarantine handling, bounded scratch staging, preflight checks, and offline tests.
 
-[Unreleased]: https://github.com/WVURAIL/datatrawl/compare/v0.2.0...HEAD
-[0.2.0]: https://github.com/WVURAIL/datatrawl/compare/v0.1.0...v0.2.0
-[0.1.0]: https://github.com/WVURAIL/datatrawl/releases/tag/v0.1.0
+[Unreleased]: https://github.com/WVURAIL/datatrawl/compare/46e1fb58188ee57a47c70e2e96e8400040f4e449...HEAD
+[1.0.0]: https://github.com/WVURAIL/datatrawl/compare/v0.2.0...46e1fb58188ee57a47c70e2e96e8400040f4e449
+[0.2.0]: https://github.com/WVURAIL/datatrawl/compare/9e693c8310b83e1afdf2372aefc62b853be97ff1...v0.2.0
+[0.1.0]: https://github.com/WVURAIL/datatrawl/commit/9e693c8310b83e1afdf2372aefc62b853be97ff1

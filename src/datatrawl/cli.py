@@ -13,14 +13,16 @@ Discovery (answer "how do I even start?"):
                                  checklist for ONE chosen combination
 
 Run:
-  datatrawl explore --telescope chime --source cadc-datatrail
-                                     what data is available (no download)
-  datatrawl survey --telescope chime --source cadc-datatrail   # -> data/chime/
-  datatrawl scan   --name chime --analyzer spectrum --select 614,706
-                                                 # telescope/source/reader read
-                                                 # from the inventory it built
+  datatrawl survey --telescope chime --source cadc-datatrail \\
+      --scope chime.event.baseband.raw --freq-ids 844 \\
+      --max-events 5 --name chime-spectrum-844
+  datatrawl explore --name chime-spectrum-844
+  datatrawl scan --name chime-spectrum-844 --analyzer spectrum \\
+      --select 844 --max-frames-per-file 5
+                            # telescope/source/reader read from the inventory
 
-The four choices -- telescope, source, reader, analyzer -- are the whole model.
+A complete scan pipeline combines four choices -- telescope, source, reader,
+analyzer.
 `survey` writes a named inventory dir (data/<telescope>-fid<freq_ids>/, or --name) and
 records the first three choices in it, so `scan` only needs the analyzer plus which
 inventory (--name or --inventory); pass --telescope/--source/--reader to override.
@@ -120,27 +122,27 @@ def _ready_combos() -> List[tuple]:
     readiness = {r.name: r for r in inst_mod.all_readiness()}
     srcs = [i for i in registry.describe("source") if i.status == READY]
     rdrs = [i for i in registry.describe("reader") if i.status == READY]
-    reds = [i for i in registry.describe("analyzer") if i.status == READY]
+    analyzers = [i for i in registry.describe("analyzer") if i.status == READY]
     combos = []
-    for red in reds:
+    for analyzer in analyzers:
         for rdr in rdrs:
             # only pair readers/analyzers that share at least one instrument
-            shared = set(rdr.instruments) & set(red.instruments)
-            if not (shared or "*" in rdr.instruments or "*" in red.instruments):
+            shared = set(rdr.instruments) & set(analyzer.instruments)
+            if not (shared or "*" in rdr.instruments or "*" in analyzer.instruments):
                 continue
             # instruments the reader+analyzer jointly support ("*" = any known)
             names = set(readiness)
             if "*" not in rdr.instruments and rdr.instruments:
                 names &= set(rdr.instruments)
-            if "*" not in red.instruments and red.instruments:
-                names &= set(red.instruments)
+            if "*" not in analyzer.instruments and analyzer.instruments:
+                names &= set(analyzer.instruments)
             for src in srcs:
                 src_names = (names if "*" in src.instruments or not src.instruments
                              else names & set(src.instruments))
                 for tel in sorted(src_names):
                     r = readiness.get(tel)
                     if r is not None and r.usable_for(src.needs_archive_config):
-                        combos.append((tel, src.name, rdr.name, red.name))
+                        combos.append((tel, src.name, rdr.name, analyzer.name))
     return combos
 
 
@@ -627,7 +629,7 @@ def cmd_survey(args) -> int:
 
 
 # --------------------------------------------------------------------------
-# explore: "what is available?" -- no download, no reduction
+# explore: "what is available?" -- no download, no analysis
 # --------------------------------------------------------------------------
 _FREQ_ID_RE = re.compile(r"_(\d+)\.h5$")
 
@@ -707,7 +709,7 @@ def _print_availability(units, source_name: str, instrument, scan_hint=None) -> 
 
 
 def cmd_explore(args) -> int:
-    """Report WHAT is available for a source -- no download, no reduction.
+    """Report WHAT is available for a source -- no download, no analysis.
 
     For the exploratory 'I don't know my selection yet' case: enumerate the
     holdings (an inventory for an archive source, a directory for local) and
@@ -845,13 +847,13 @@ def cmd_scan(args) -> int:
     src = _require_plugin("source", args.source)()
     rdr = _require_plugin("reader", args.reader)()
     ctx.reader = rdr
-    red_cls = _require_plugin("analyzer", args.analyzer)
+    analyzer_cls = _require_plugin("analyzer", args.analyzer)
 
     # The analysis splits --select into independent runs (one product each).
     # For the spectrum analyzer that is one run per freq_id: each <freq_id>.npz
     # checkpoints and resumes on its own, which is what makes a long multi-freq_id
     # pull self-healing rather than all-or-nothing.
-    runs = red_cls().plan_runs(ctx, args.select)
+    runs = analyzer_cls().plan_runs(ctx, args.select)
     if not runs:
         print("nothing to do: --select resolved to an empty set", file=sys.stderr)
         return 1
@@ -894,9 +896,9 @@ def cmd_scan(args) -> int:
                 if len(units) > 3:
                     print(f"      ... and {len(units) - 3} more")
                 continue
-            red = red_cls()                     # FRESH analyzer per product
+            analyzer = analyzer_cls()           # FRESH analyzer per product
             res = pipeline.run(
-                source=src, reader=rdr, analyzer=red, units=units,
+                source=src, reader=rdr, analyzer=analyzer, units=units,
                 out_path=out, tmp_dir=tmp, ctx=ctx,
                 checkpoint_every=args.checkpoint_every,
                 download_workers=args.download_workers,
@@ -967,7 +969,7 @@ def positive_int(s: str) -> int:
 
 
 def cmd_setup_cupy(args) -> int:
-    """Install the CuPy build matching this CANFAR session's CUDA, for GPU analyzers.
+    """Report or install the CuPy build matching this session's CUDA.
 
     datatrawl prefers the CuPy the session image already ships, so this only acts when
     the image has none. It calls datatrawl.accel.ensure_cupy -- the same resolution a
@@ -1242,7 +1244,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_setup_cupy = sub.add_parser(
         "setup-cupy",
-        help="install the CuPy build matching this image's CUDA (for scan --gpu)")
+        help="report the matching CuPy build, or install it with --install")
     p_setup_cupy.add_argument(
         "--install", action="store_true",
         help="pip-install the detected cupy-cudaXXx wheel if the image has no cupy "

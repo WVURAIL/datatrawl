@@ -52,7 +52,7 @@
 \node[anchor=base west, text=muted, font=\small] at (40,80)
   {\textcolor{cyantext}{four pieces} $\rightarrow$
    \textcolor{ink}{one fixed engine} $\rightarrow$
-   \textcolor{ambersoft}{one product per channel}};
+   \textcolor{ambersoft}{analyzer-defined products}};
 
 % ---------------------------------------------------- four plugin boxes
 % centers x = 318, 486, 654, 822; box top y = 104
@@ -106,7 +106,7 @@
 \draw[flow, cyanline!80!canvas, line width=1.0pt, rounded corners=8pt]
   (checkpoint.south) -- ++(0,22) -- ($(fetch.south)+(0,22)$) -- (fetch.south);
 \node[anchor=base, text=dim, font=\footnotesize\itshape] at (551,352)
-  {repeat per file --- disk stays at one file, memory flat};
+  {repeat per unit --- bounded staging, streaming arrays};
 
 % ---------------------------------------------------------------- archive
 \node[anchor=base west, text=ink, font=\normalsize\bfseries] at (60,210) {archive};
@@ -123,17 +123,17 @@
 
 % --------------------------------------------------------------- products
 \node[anchor=base, text=ink,   font=\normalsize\bfseries] at (990,210)
-  {one product / channel};
+  {analyzer-defined};
 \node[anchor=base, text=muted, font=\footnotesize] at (990,227)
-  {each a self-describing .npz};
+  {resumable products};
 
 \node[card] (p1) at (990,272) {};
 \node[card] (p2) at (990,320) {};
 \node[card] (p3) at (990,368) {};
-\node[anchor=base, text=cyanpale, font=\small] at (990,269) {614.npz};
-\node[anchor=base, text=cyanpale, font=\small] at (990,317) {706.npz};
-\node[anchor=base, text=cyanpale, font=\small] at (990,365) {598.npz};
-\node[anchor=base, text=muted, font=\footnotesize] at (990,413) {\dots\ 23 channels};
+\node[anchor=base, text=cyanpale, font=\small] at (990,269) {product-a.npz};
+\node[anchor=base, text=cyanpale, font=\small] at (990,317) {product-b.npz};
+\node[anchor=base, text=cyanpale, font=\small] at (990,365) {\dots};
+\node[anchor=base, text=muted, font=\footnotesize] at (990,413) {fan-out is plugin-defined};
 
 \draw[flow, draw=amber] (880,302) -- (p2.west);
 
