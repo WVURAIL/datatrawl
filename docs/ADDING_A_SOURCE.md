@@ -61,18 +61,21 @@ arguments on `survey`, `explore`, and `doctor`.
 
 ## A different archive layout
 
-The shipped `cadc-datatrail` source is specific to CHIME baseband -- it enumerates
-`baseband_<event>_<freq_id>.h5` per event. A Datatrail scope with a different layout (for
-example a processed-acquisition scope whose datasets carry their own attached files) needs a
-*new source*: one that enumerates that scope's datasets and files and yields one `Unit`
-per file. The shipped `cadc-datatrail` source is the reference -- it reaches Datatrail
-through the CLI's machine-readable mode (`datatrail ls` / `ps` with `--json`,
-datatrail-cli >= 0.11; the same commands without `--json` are still the way to
-explore a scope's layout by hand first). Build it in your own project and
-load it with `--plugin`; nothing in datatrawl changes.
+The shipped `cadc-datatrail` source is an event-keyed CADC/Datatrail source.
+For CHIME baseband, it defaults to the `chime-baseband` reader's archive file
+shape (`baseband_<event>_<freq_id>.h5`). For another event-keyed product, a new
+reader may be enough if that reader can declare `survey_files()`.
 
-References: `src/datatrawl/plugins/sources/local.py` (a minimal source) and
-`src/datatrawl/plugins/sources/cadc_datatrail.py` (a full Datatrail survey).
+Write a new source when the archive layout itself is not event-keyed, when
+listing/staging policy differs, when units are not resolved through the
+Datatrail event common-path pattern, or when the data source is not
+CADC/Datatrail.
+
+The shipped source currently reaches Datatrail through datatrail-cli's
+internal API (pinned datatrail-cli==0.10.3 in production); migration to the
+public `datatrail ls/ps --json` contract (datatrail-cli >= 0.11) is queued.
+It verifies candidate files with CADC metadata, writes a persistent
+inventory, and later fetches units with CADC.
 
 ## Registering and loading
 

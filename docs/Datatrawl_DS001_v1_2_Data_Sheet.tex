@@ -228,7 +228,7 @@ Delivery order & Source order & Guaranteed at the defaults; completion order
 otherwise. In-order analyzers can only run at the defaults. \\
 Staging directory & Per invocation & Unique path per scan; concurrent scans
 cannot delete each other's staged files. \\
-Product write & Atomic & \code{<product>.tmp} then rename; a kill never leaves
+Product write & Atomic & a temporary file in the product directory, then atomic replace; a kill never leaves
 a partial product. \\
 Resume gate & Strict & \field{resume()} must raise on an existing but
 incompatible product; two configurations can never mix into one file. \\

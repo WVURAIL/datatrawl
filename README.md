@@ -10,10 +10,13 @@
 
 Storage-safe archive trawling for resumable telescope-data analysis.
 
-*Storage-safe* means the scratch footprint is bounded: at most one staged file
-exists at any time, deleted the moment it has been streamed. *Resumable* means
-the product is checkpointed after every unit, so an interrupted run continues
-where it stopped.
+*Storage-safe* means the scratch footprint is bounded: by default at most one
+staged file exists at a time, and it is deleted after it has been streamed.
+Raise `--max-staged-files` only when you explicitly want bounded prefetching.
+
+*Resumable* means each product is atomically checkpointed every
+`--checkpoint-every` files, default 50, and at run end; an interrupted run
+continues from the product's recorded unit keys.
 
 `datatrawl` is a downstream run layer for safely scanning Datatrail/CADC data
 one file at a time. Datatrail remains the archive authority: it knows which
@@ -404,6 +407,7 @@ inputs are in [`docs/ADDING_AN_ANALYZER.md`](docs/ADDING_AN_ANALYZER.md).
 | [`docs/ADDING_A_TELESCOPE.md`](docs/ADDING_A_TELESCOPE.md) | Add a new instrument geometry YAML. |
 | [`docs/DATATRAIL_BOUNDARY.md`](docs/DATATRAIL_BOUNDARY.md) | Map a use case onto Datatrail + datatrawl responsibilities. |
 | [`docs/TROUBLESHOOTING.md`](docs/TROUBLESHOOTING.md) | Long runs, self-healing, quarantine, expired certs, and recovery. |
+| [`docs/CLI_OUTPUT.md`](docs/CLI_OUTPUT.md) | Interpret `doctor`, `survey`, `explore`, and `scan` output in SSH, `tmux`, `nohup`, and CANFAR logs. |
 
 ## Design notes
 

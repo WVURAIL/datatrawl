@@ -59,6 +59,12 @@ class GainsReader(Reader):
     info = PluginInfo(name="chime-gains", kind="reader",
                       summary="Per-event gain solutions (HDF5).")
 
+This survey pattern applies when the archive product is event-keyed: one
+event resolves to one common path, and the reader can name that event's
+expected files. For day-keyed, timestamped, or container-style products,
+build a discovery map first and resolve files from an analyzer or a custom
+source instead of forcing the event-survey model.
+
     def survey_files(self, event, common_path, selection, ctx):
         # (filename, fields) per candidate file. Baseband yields one per
         # freq_id with {"freq_id": ch}; a per-event product yields one file.

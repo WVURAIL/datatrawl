@@ -7,9 +7,13 @@ same command**.
 
 ## How self-healing works
 
-- **One file at a time.** The engine stages a file, reduces it, deletes it, moves
+- **Bounded staged files.** At the defaults, the engine stages one file,
+  reduces it, deletes it, and moves on. If you raise `--max-staged-files`,
+  disk use is bounded by that explicit limit.
   on -- disk never holds more than ~one file. Your archive data is never touched.
-- **One product per freq_id.** A multi-freq_id `--select` fans out to independent
+- **Independent products when the analyzer fans out.** The built-in `spectrum`
+  analyzer fans a multi-freq_id selection into one product per freq_id. Other
+  analyzers may choose a different `plan_runs()` split.
   products (`614.npz`, `706.npz`); each checkpoints, resumes, and fails on its own.
 - **Atomic checkpoints.** Every `--checkpoint-every` files (default 50) each
   product is rewritten via temp file + atomic rename, never left half-written.

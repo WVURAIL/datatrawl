@@ -126,7 +126,10 @@ doctor} exists to make the four choices and their prerequisites legible
 git clone https://github.com/WVURAIL/datatrawl.git
 cd datatrawl
 python -m venv .venv && source .venv/bin/activate
-pip install -e ".[dev]"
+pip install -e ".[dev,examples]"   # offline/local development
+# For archive/CANFAR use instead:
+#   pip install -e ".[survey,examples,dev]"
+#   cadc-get-cert -u <your_cadc_username>
 datatrawl --version
 pytest -q
 \end{lstlisting}

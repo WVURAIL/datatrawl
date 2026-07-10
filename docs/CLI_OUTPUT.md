@@ -85,6 +85,10 @@ event with Datatrail and one expected CADC URI before scaling up.
 
 ## `datatrawl explore`
 
+For `cadc-datatrail`, `explore` reads a survey inventory: run `survey` first
+or pass `--name` / `--inventory`. For `local`, `explore` can enumerate the
+directory directly with `--source-root`.
+
 `explore` summarizes an existing inventory or local directory without staging data:
 
 ```text
