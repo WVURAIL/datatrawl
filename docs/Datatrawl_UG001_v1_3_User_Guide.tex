@@ -120,15 +120,15 @@
 \vspace{8pt}
 
 \section{The Model in One Paragraph}
-Every complete scan pipeline combines four choices: a \textbf{telescope} (geometry and
-metadata), a \textbf{source} (where files come from), a \textbf{reader} (how
-one primary file becomes arrays), and an \textbf{analyzer} (the science). The
-engine consumes one unit at a time --- fetch, analyze, delete, checkpoint ---
-while optionally prefetching other independent units within an explicit
-staged-file-count bound. The analyzer may split a selection into one or more
-independently resumable products. \code{datatrawl doctor} exists to make the
-four choices and their prerequisites legible \emph{before} you spend hours on
-a scan.
+Long archive scans are limited by scratch space and interrupted computing
+sessions. We address these constraints by processing one primary file as one
+unit and checkpointing a small analysis product. A run combines four choices:
+a \textbf{telescope} supplies geometry and metadata, a \textbf{source} lists
+and stages files, a \textbf{reader} converts one staged file into arrays, and
+an \textbf{analyzer} performs the science calculation. The engine fetches,
+analyzes, and removes each unit while keeping the number of staged files within
+the configured bound. Use \code{datatrawl doctor} to check the four choices
+before starting a long scan.
 
 \section{Installation}
 \begin{lstlisting}
@@ -143,10 +143,11 @@ pip install -e ".[dev,examples]"   # offline/local development
 datatrawl --version
 pytest -q
 \end{lstlisting}
-Optional extras: \code{[cadc]} for CADC fetching from an existing inventory;
-\code{[survey]} for inventory construction (it includes the CADC clients and
-\code{datatrail-cli>=0.11.0}); \code{[gpu]} declares no pinned package because
-CuPy must match the session image (see \S\ref{sec:cupy}).
+The \code{[cadc]} extra supports CADC fetching from an existing inventory. The
+\code{[survey]} extra adds the CADC clients and
+\code{datatrail-cli>=0.11.0} for inventory construction. The \code{[gpu]}
+extra does not pin CuPy because the installed CuPy build must match the session
+image (see \S\ref{sec:cupy}).
 
 \section{Discovering What Is Available}
 \begin{lstlisting}
@@ -156,46 +157,49 @@ datatrawl list readers
 datatrawl list analyzers
 datatrawl list sources
 \end{lstlisting}
-Then verify one concrete combination end to end:
+Next, check the combination that will be used for the scan:
 \begin{lstlisting}
 datatrawl doctor --telescope chime --source cadc-datatrail \
                  --reader chime-baseband --analyzer spectrum
 \end{lstlisting}
-\code{doctor} reports, per choice, what is installed, what is configured, what
-credentials are missing, and whether the combination is ready to run.
+\code{doctor} reports the installed components, configuration, credentials,
+and readiness of the selected combination.
 
-Before committing to any of that, map the archive itself. Recon is
-\code{survey}'s no-download mode: it lists datasets across scopes and writes
-the result as a reusable map (\code{scopes.jsonl}, or
+When the archive layout is not yet known, first build a discovery map. The
+\code{survey --scopes-only} mode lists datasets across scopes without
+enumerating events or downloading files. It writes the result to
+\code{scopes.jsonl}, or to
 \code{scopes-<name>.jsonl} with \code{--name}, so successive recons do not
-overwrite each other):
+overwrite one another:
 \begin{lstlisting}
 datatrawl survey --telescope gbo --scopes-only              # this telescope's scopes
 datatrawl survey --scopes-only                              # every scope datatrail sees
 datatrawl survey --telescope gbo --scopes-only \
     --scope gbo.acquisition.processed --match gain --expand --name gains
 \end{lstlisting}
-\code{--telescope} narrows the walk to that telescope's \emph{live} scopes
-(first name component --- deliberately not the instrument YAML, which declares
-only what the event survey walks); omit it for zero-knowledge discovery.
-\code{--match} keeps name matches (comma-separated terms, ANDed);
-\code{--expand} opens each kept dataset one level, so a container such as
-\code{complex_gains} yields its children as rows (with a \field{parent}
-column). Every row resolves directly with
-\code{datatrail ps <scope> <dataset> -s}. A scope datatrail fails to answer
-for is named in-walk and in a closing \code{[warn]} block marking the map
-INCOMPLETE --- an outage is never mistaken for emptiness.
-\notebox{Recon finds names; survey's event walk enumerates \emph{event-keyed}
-data only. A container of timestamped, non-event products (calibration
-acquisitions) is reached through recon \code{--expand} and the programmatic
-file listing \code{DATATRAIL.files()}, never through an event survey. The
-split is spelled out in \code{docs/DATATRAIL_BOUNDARY.md}.}
+\Needspace{11\baselineskip}
+\code{--telescope} restricts discovery to live scopes whose first name
+component matches the telescope. These scopes come from Datatrail rather than
+the instrument YAML, because the YAML only declares scopes used by the event
+survey. Omit \code{--telescope} to inspect every visible scope.
+\code{--match} keeps names containing all comma-separated terms.
+\code{--expand} opens each retained dataset by one level, so a container such
+as \code{complex_gains} contributes its children as rows with a
+\field{parent} column. Each row can then be inspected with
+\code{datatrail ps <scope> <dataset> -s}. If Datatrail does not answer for a
+scope, the command identifies that scope and marks the map INCOMPLETE.
+\notebox{Discovery maps names and containers. The event survey enumerates only
+event-keyed products. For a timestamped product such as a calibration
+acquisition, use \code{--scopes-only --expand}, then list the selected dataset
+with \code{DATATRAIL.files()}. See
+\code{docs/DATATRAIL_BOUNDARY.md} for the division of responsibility.}
 
 \section{Building an Inventory}
-\code{survey} walks the archive once and writes a named inventory directory
-(default \code{data/<telescope>-fid<freq_ids>/}, or \code{--name}); it records
-the telescope, source, and reader choices inside the inventory so later scans
-need only the analyzer:
+\code{survey} converts the archive listing into the units required by one
+analysis. It writes a named inventory directory, using
+\code{data/<telescope>-fid<freq_ids>/} by default or the value passed to
+\code{--name}. The inventory metadata records the telescope, source, and
+reader, so a later scan only needs the inventory and analyzer:
 \begin{lstlisting}
 datatrawl survey \
   --telescope chime --source cadc-datatrail \
@@ -204,18 +208,19 @@ datatrawl survey \
 
 datatrawl explore --name chime-spectrum-844
 \end{lstlisting}
-This first survey is deliberately bounded and does not bulk-download data.
-Inventories persist on disk between commands. During a scan, the current engine
-loads the units selected for each product into memory before staging begins, so
-memory use grows with the number of selected rows.
+The \code{--max-events 5} setting bounds this first survey. Survey verifies
+candidate files but does not bulk-download them. The inventory remains on disk
+between commands. During a scan, the current engine loads the rows selected for
+one product into memory before staging begins. Memory use therefore grows with
+the selected inventory size.
 
-The reader also owns the \emph{archive file shape}: which files one event
-contributes and what they are named (\field{Reader.survey_files}). Survey
-resolves the telescope's canonical reader (override with \code{--reader}) and
-writes each verified file's \field{name} into its row, so a later scan stages
-exactly what the survey verified --- the two cannot drift. A non-baseband
-product becomes surveyable by loading a small external shape reader with
-\code{--plugin}; see \code{docs/ADDING_A_READER.md}.
+The reader defines the \emph{archive file shape}: the files expected for one
+event and their names (\field{Reader.survey_files}). Survey uses the
+telescope's canonical reader unless \code{--reader} overrides it. Each
+verified row records its \field{name}; a later scan stages that recorded file
+instead of reconstructing the naming rule. To survey a non-baseband product,
+load a reader that defines its archive shape with \code{--plugin}; see
+\code{docs/ADDING_A_READER.md}.
 
 \section{Running a Scan}
 \begin{lstlisting}
@@ -223,9 +228,9 @@ datatrawl scan \
   --name chime-spectrum-844 --analyzer spectrum --select 844 \
   --max-frames-per-file 5
 \end{lstlisting}
-This smoke-test product is intentionally capped. Remove the cap only with a
-fresh \code{--out} or after deleting the capped product; datatrawl refuses to
-mix capped and uncapped runs.
+This command limits each file to five frames and is intended as a smoke test.
+For an uncapped run, use a new \code{--out} or remove the smoke-test product.
+The spectrum analyzer rejects a resume when the cap differs.
 \begin{itemize}
   \item \code{--select} is interpreted by the analyzer. For the spectrum
         analyzer: explicit \field{freq_id}s such as \code{844},
@@ -233,14 +238,15 @@ mix capped and uncapped runs.
         analyzers take \code{events:349382977[,...]}, and a
         \field{plan_runs} may return the dict form
         \code{{"events": [...], "freq_ids": ...}}; filters are exact and
-        ANDed, and a malformed selection fails with the grammar named, not a
-        traceback. The analyzer's \field{plan_runs} decides product fan-out;
+        ANDed. A malformed selection reports the accepted grammar. The
+        analyzer's \field{plan_runs} decides product fan-out;
         the built-in spectrum analyzer creates one independent product per
         selected \field{freq_id}.
-  \item \code{--checkpoint-every N} (default 50) sets how many files may need
-        re-processing after a kill; each checkpoint is an atomic full-product
-        save.
-  \item \code{--download-workers} controls concurrent fetch calls;
+  \item \code{--checkpoint-every N} (default 50) sets the checkpoint
+        interval. Files consumed after the most recent completed checkpoint
+        may need to be processed again after an interruption.
+  \item \code{--download-workers} sets the number of fetch threads; concurrent
+        fetches also require more than one staging slot.
         \code{--max-staged-files} caps fetched or in-progress files on scratch
         and permits fetch/analyze overlap. Analyzer calls remain serial on the
         engine's main thread. The engine refuses either value above 1 when the
@@ -250,52 +256,53 @@ mix capped and uncapped runs.
         entry-point group are found automatically.
 \end{itemize}
 
-\importantbox{At the defaults, at most one staged or in-progress file exists.
-If \code{--max-staged-files} is raised, no more than that configured number is
-staged. Without \code{--tmp-dir}, each invocation receives a unique staging
-directory. An explicit \code{--tmp-dir} is used as-is, so concurrent scans must
-receive distinct paths. Each staged file is deleted after consumption; never
-point a staging directory at precious data.}
+\importantbox{At the defaults, one staged or in-progress file occupies scratch.
+If \code{--max-staged-files} is raised, the configured number is the file-count
+bound. Without \code{--tmp-dir}, each invocation receives a unique staging
+directory. An explicit \code{--tmp-dir} is used as-is, so concurrent scans
+require distinct paths. The engine removes the files it stages; use a scratch
+directory that does not contain source data or other required files.}
 
-\section{Kill and Resume}
-A scan may be killed at any instant --- session timeout, preemption,
-\code{Ctrl-C}. On restart with the same configuration and output, the analyzer
-re-loads its product, skips every unit already accumulated, and continues. The
-guarantee: at most the files consumed since the last checkpoint are re-done,
-and the product is never left partially written (a temporary file in the
-product directory atomically replaces the previous checkpoint). A resume
-against an \emph{incompatible} existing product is refused with an explicit
-error rather than silently mixing two configurations; use a clean output
-location to rebuild.
+\section{Interrupt and Resume}
+A session timeout, preemption, or \code{Ctrl-C} may stop a scan. Repeat the
+same command with the same output to continue. The analyzer reloads the last
+completed checkpoint and reports its committed unit keys; the engine skips
+matching units. Files consumed after that checkpoint may be processed again.
+The supplied analyzer base class and spectrum analyzer write a temporary
+product in the output directory and replace the prior checkpoint only after the
+write completes. An external analyzer owns the equivalent recovery behavior.
+If a changed parameter would alter product meaning, a conforming analyzer
+rejects the resume. Use a new output location when intentionally changing the
+configuration.
 
 \Needspace{7\baselineskip}
 \section{CANFAR / CADC Notes}
-On a CANFAR session, install with \code{[survey]} when building inventories;
-it already includes the CADC clients. Use \code{[cadc]} alone only when
-scanning an existing inventory without Datatrail discovery. Ensure a valid
-CADC proxy certificate, and
-let \code{datatrawl doctor --source cadc-datatrail ...} confirm credentials
-and the Datatrail contract before launching. Datatrail remains the archive
-authority --- datatrawl only reads; the boundary is specified in
-\code{docs/DATATRAIL_BOUNDARY.md}. For long scans, size
-\code{--checkpoint-every} so an unexpected session end costs minutes, not
-hours.
+On CANFAR, install \code{[survey]} when building an inventory; this extra
+includes the CADC clients. Use \code{[cadc]} alone when scanning an existing
+inventory without Datatrail discovery. Obtain a valid CADC proxy certificate,
+then run \code{datatrawl doctor --source cadc-datatrail ...} to check the
+credentials and Datatrail interface. Datatrail remains the archive authority
+and datatrawl reads from it. The boundary is defined in
+\code{docs/DATATRAIL_BOUNDARY.md}. For a long scan, choose
+\code{--checkpoint-every} by balancing repeated work after interruption
+against product-write overhead.
 
 \section{GPU Sessions and CuPy}\label{sec:cupy}
-GPU analyzers use CuPy, which must match the session image's CUDA runtime, so
-it is not pinned as a dependency. On a GPU node:
+GPU analyzers use CuPy. The CuPy build must match the CUDA runtime in the
+session image, so datatrawl does not pin it as a package dependency. On a GPU
+node:
 \begin{lstlisting}
 datatrawl setup-cupy            # report the image's CUDA + the matching wheel
 datatrawl setup-cupy --install  # install cupy-cudaXXx into the active venv
 \end{lstlisting}
-Without \code{--gpu}, the built-in spectrum analyzer uses NumPy and requires no
-CuPy. With \code{--gpu}, CuPy is required; if it is not importable, the scan
-stops with an instruction to run \code{datatrawl setup-cupy --install}. The CPU
-and GPU paths implement the same algorithm but may differ at floating-point
-roundoff.
+Without \code{--gpu}, the built-in spectrum analyzer uses NumPy. With
+\code{--gpu}, it requires CuPy; if CuPy cannot be imported, the scan reports
+the setup command and stops. The CPU and GPU paths implement the same
+calculation, although floating-point roundoff may differ.
 
 \section{Writing an Analyzer}
-The analyzer owns its product file. Implement the lifecycle and register it:
+The analyzer performs the analysis and owns the product contract. Implement
+the lifecycle and register the class:
 \begin{lstlisting}
 class MyAnalyzer(Analyzer):
     info = PluginInfo(name="my-analyzer", ...)
@@ -306,38 +313,38 @@ class MyAnalyzer(Analyzer):
     def processed_keys(self):         # unit keys already in the product
     def begin(self, ctx, first_meta): # once, at the first new file
     def consume_file(self, arrays, meta):  # accumulate; return n frames
-    def save(self, path):             # atomic write with provenance
+    def save(self, path):             # persist product, keys, and provenance
     def summary(self):                # one status line
 \end{lstlisting}
-Two optional hooks shape selection: \field{resolve_selection} interprets the
-user's \code{--select} for your analysis, and \field{plan_runs} splits it into
-independent runs, each with a fresh analyzer instance and its own resumable
-product. All accumulator writes happen on the engine's main thread, so no
-locking is needed. The complete walkthrough, including the inventory-metadata
-contract your reader must satisfy, is in \code{docs/ADDING_AN_ANALYZER.md}
-(and its \code{READER}/\code{SOURCE}/\code{TELESCOPE} siblings).
+Two optional hooks define selection behavior. \field{resolve_selection}
+interprets \code{--select}, and \field{plan_runs} divides that selection into
+independent runs. Each run receives a new analyzer instance and product.
+Analyzer calls occur on the engine's main thread. The complete lifecycle and
+inventory-metadata contract are described in
+\code{docs/ADDING_AN_ANALYZER.md} and the corresponding reader, source, and
+telescope guides.
 
-Two patterns built on those hooks are worked end to end in the repository.
-\emph{Per-event fan-out}: \field{plan_runs} returns one
+\Needspace{12\baselineskip}
+The repository includes two worked patterns. For \emph{per-event fan-out},
+\field{plan_runs} returns one
 \code{{"events": [ev], "freq_ids": spec}} sub-selection per event, so each
 event becomes its own resumable product
 (\code{ev<event>[_<freq_ids>].npz}); both archive and local sources
-understand the dict natively. \emph{Companion side-loads}: an analyzer
-needing a per-event auxiliary (calibration gains, flags) loads its lookup
-once in \field{begin} and resolves per file off \field{meta["event"]},
-stamping the companion's identity into the product and refusing a resume if
-the lookup later disagrees. Day-keyed companion archives resolve lazily with
+understand this dictionary. For a \emph{companion side-load}, an analyzer that
+needs calibration gains or flags loads a lookup once in \field{begin}, then
+selects the companion from \field{meta["event"]} for each primary file. The
+analyzer records the companion identity in its product and rejects a resume if
+the lookup changes. Day-keyed companion archives can instead resolve with
 \code{DATATRAIL.files(scope, day)}, imported from
 \code{datatrawl.plugins.sources} --- the programmatic
 \code{datatrail ps -s}. The runnable, CLI-tested reference is
 \code{examples/per_event_companions.py}; the patterns are written out in
 \code{docs/ADDING_AN_ANALYZER.md}.
 
-\importantbox{If your product depends on the order files are consumed --- a
-running or trailing statistic, a CFAR baseline --- set
-\field{requires_in_order = True}. The engine enforces that contract by refusing
-either parallel/prefetch setting above 1, so an order-dependent analyzer must
-use both defaults.}
+\importantbox{If the product depends on consume order, including a running
+statistic, trailing statistic, or CFAR baseline, set
+\field{requires_in_order = True}. The engine then rejects either parallel or
+prefetch setting above 1.}
 
 \Needspace{0.20\textheight}
 \section{Troubleshooting}
@@ -350,7 +357,8 @@ with your four choices. \\
 Scan refuses to start & Read the doctor-style preflight error: missing extra,
 missing credential, or a reader/telescope mismatch. \\
 Resume refused & The existing product was built with different parameters;
-that refusal is the safety feature. Rebuild in a clean output location. \\
+the analyzer prevents those configurations from being combined. Rebuild in a
+new output location. \\
 Parallel flags refused & The analyzer declares \field{requires_in_order};
 run at the defaults. \\
 Anything else & \code{docs/TROUBLESHOOTING.md} in the repository. \\

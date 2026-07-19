@@ -1,16 +1,16 @@
 """
 datatrawl CLI.
 
-Discovery (answer "how do I even start?"):
-  datatrawl list                 everything available, at a glance
+Start by listing the available components:
+  datatrawl list                 show every registered component
   datatrawl list telescopes      telescopes (ready vs. stub)
   datatrawl list readers         file-format readers
   datatrawl list analyzers       science plugins
   datatrawl list sources         where data comes from
-  datatrawl doctor               the startup checklist + ready-to-go combos
+  datatrawl doctor               show the startup checks and usable combinations
   datatrawl doctor --telescope chime --source cadc-datatrail \\
                    --reader chime-baseband --analyzer spectrum
-                                 checklist for ONE chosen combination
+                                 check one selected combination
 
 Run:
   datatrawl survey --telescope chime --source cadc-datatrail \\
@@ -21,13 +21,12 @@ Run:
       --select 844 --max-frames-per-file 5
                             # telescope/source/reader read from the inventory
 
-A complete scan pipeline combines four choices -- telescope, source, reader,
-analyzer.
-`survey` writes a named inventory dir (data/<telescope>-fid<freq_ids>/, or --name) and
-records the first three choices in it, so `scan` only needs the analyzer plus which
-inventory (--name or --inventory); pass --telescope/--source/--reader to override.
-`doctor` exists to make those choices and their prerequisites legible before you
-spend hours on a scan.
+A scan combines four choices: telescope, source, reader, and analyzer. Before
+starting a long run, use `doctor` to check the selected combination and its
+prerequisites. `survey` records the telescope, source, and reader in a named
+inventory directory (`data/<telescope>-fid<freq_ids>/`, or the value passed to
+`--name`). A later `scan` therefore needs the inventory and analyzer; explicit
+`--telescope`, `--source`, and `--reader` values override the recorded choices.
 """
 from __future__ import annotations
 
@@ -1021,9 +1020,9 @@ def build_parser() -> argparse.ArgumentParser:
     common = argparse.ArgumentParser(add_help=False)
     common.add_argument(
         "--plugin", action="append", default=[], metavar="MODULE_OR_PATH",
-        help="import an external plugin so it registers (repeatable). A dotted "
-             "module ('mypkg.analyzers.fstat') or a path to a .py file. Also "
-             "honoured via the DATATRAWL_PLUGINS env var and entry points.")
+        help="load an external plugin (repeatable). Pass a dotted module "
+             "('mypkg.analyzers.fstat') or a .py path. Plugins may also be "
+             "loaded through DATATRAWL_PLUGINS or package entry points.")
 
     p_list = sub.add_parser("list", parents=[common],
                             help="show available telescopes/sources/readers/analyzers")
@@ -1032,7 +1031,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_list.set_defaults(func=cmd_list)
 
     p_doctor = sub.add_parser("doctor", parents=[common],
-                              help="startup checklist for a chosen combination")
+                              help="check the prerequisites for a pipeline")
     p_doctor.add_argument("--telescope",
                           help="telescope to check (see `datatrawl list telescopes`)")
     p_doctor.add_argument("--source",
@@ -1053,7 +1052,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_doctor.set_defaults(func=cmd_doctor)
 
     p_survey = sub.add_parser("survey", parents=[common],
-                              help="walk the archive to build an inventory for a source")
+                              help="build an analysis inventory from an archive")
     p_survey.add_argument("--telescope", default=None,
                           help="telescope whose scopes to survey (e.g. chime). "
                                "Required for an event survey; optional for recon "
@@ -1126,7 +1125,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_expl = sub.add_parser(
         "explore", parents=[common],
-        help="report what data is available for a source (no download)")
+        help="summarize an inventory or local source without staging data")
     p_expl.add_argument("--source", default=None,
                         help="data source; optional when --name/--inventory is "
                              "given (read from the inventory meta, like `scan`)")
@@ -1204,18 +1203,20 @@ def build_parser() -> argparse.ArgumentParser:
         help="scratch directory for staged files. Default: a unique directory "
              "under DATATRAWL_TMPDIR, writable /scratch, or the OS temp directory")
     p_scan.add_argument("--checkpoint-every", type=positive_int, default=50,
-                        help="write the product checkpoint every N files "
+                        help="write the product checkpoint every N successfully "
+                             "consumed files "
                              "(default 50); resume restarts from the last "
                              "checkpoint, so lower = less redo after a kill, "
                              "more I/O")
     p_scan.add_argument("--download-workers", type=positive_int, default=1,
-                        help="parallel download threads (default 1; >1 overlaps "
-                             "downloads but delivers files in completion order, so "
-                             "the analyzer must be order-insensitive)")
+                        help="download threads (default 1). Concurrent fetches "
+                             "also require multiple staging slots; relaxed "
+                             "settings may deliver files out of source order, so "
+                             "the analyzer must be order-insensitive")
     p_scan.add_argument("--max-staged-files", type=positive_int, default=1,
-                        help="max files kept on scratch at once (default 1 = the "
-                             "storage-safe one-file guarantee; raise to trade disk "
-                             "for download/analyze overlap, bound = N x largest file)")
+                        help="maximum files kept on scratch at once (default 1). "
+                             "Higher values allow download/analyze overlap and "
+                             "require space for about N times the largest file")
     p_scan.add_argument("--max-files", type=positive_int, default=None,
                         help="process only the first N units of the selection "
                              "(bounded smoke test; keep its product separate "

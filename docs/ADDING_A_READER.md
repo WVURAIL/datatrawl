@@ -1,17 +1,19 @@
 # Adding a reader
 
-A **reader** turns one staged file into the arrays (frames) an analyzer consumes. You add
-one when your files are in a format the shipped `chime-baseband` reader doesn't understand
--- a different dataset layout, dtype packing, or set of attributes.
+A **reader** turns one staged file into the arrays that an analyzer consumes. Add a reader
+when the file format differs from the shipped `chime-baseband` format. The difference may
+be the dataset layout, sample packing, data type, or metadata attributes.
 
-This is one of the four pluggable pieces (instrument / source / reader / analyzer); see
-[`ADDING_A_SOURCE.md`](ADDING_A_SOURCE.md), [`ADDING_AN_ANALYZER.md`](ADDING_AN_ANALYZER.md),
-and [`ADDING_A_TELESCOPE.md`](ADDING_A_TELESCOPE.md) for the others.
+The run pipeline has four pluggable parts: telescope, source, reader, and analyzer. The
+reader owns the on-disk format. The other extension points are described in
+[`ADDING_A_SOURCE.md`](ADDING_A_SOURCE.md),
+[`ADDING_AN_ANALYZER.md`](ADDING_AN_ANALYZER.md), and
+[`ADDING_A_TELESCOPE.md`](ADDING_A_TELESCOPE.md).
 
 ## The two methods
 
-A reader owns the on-disk format knowledge (dataset names, dtype packing, attribute
-conventions) and implements `probe` and `iter_arrays`:
+A reader implements two methods. `probe` reads the small metadata needed to plan the
+analysis, and `iter_arrays` yields the data arrays in streaming order.
 
 ```python
 from datatrawl.interfaces import Reader, PluginInfo, RunContext
@@ -33,35 +35,33 @@ class MyReader(Reader):
             yield frame
 ```
 
-`probe` returns the small metadata an analyzer needs (centre frequency, sample rate, frame
-length); `iter_arrays` streams the data so the engine never holds a whole file in memory.
+`probe` returns metadata such as centre frequency, sample rate, and frame length without
+reading the bulk array. The engine consumes the iterator returned by `iter_arrays`, so the
+reader can decode the file incrementally instead of materializing the complete file.
 
-The shape of the arrays a reader yields is a private contract between it and its analyzer --
-the engine passes them through unchanged and never inspects them. CHIME baseband yields
-`[nfft, n_feeds]` frames (many feeds to combine); a beamformed format might yield `[nfft]`
-frames (a single stream). Either is fine, as long as the analyzer paired with the reader
-expects that shape.
+The array shape is a contract between the reader and analyzer. The engine passes each array
+through without interpreting its dimensions. The CHIME baseband reader yields
+`[nfft, n_feeds]` frames so an analyzer can combine feeds. A beamformed reader may instead
+yield one `[nfft]` stream. Both forms work when the selected analyzer expects the reader's
+shape.
 
-Reference: `src/datatrawl/plugins/readers/chime_baseband.py` (a worked reader, with the
-4+4-bit unpacking in `_baseband_format.py`).
+The implementation in `src/datatrawl/plugins/readers/chime_baseband.py` is the primary
+reference. Its 4+4-bit unpacking is implemented in `_baseband_format.py`.
 
 ## Archive file shape (optional): making a product surveyable
 
-`probe`/`iter_arrays` are enough to scan files that are already listed (a local directory,
-or an existing inventory). To let `datatrawl survey` build an inventory of YOUR product
-from the archive, the reader also declares its **archive file shape** -- which files one
-event contributes, and what they are named. That is format knowledge, so it lives on the
-same class that will later open the files; survey and read then share one naming
-definition and cannot drift:
+`probe` and `iter_arrays` are sufficient when the files already appear in a local listing
+or inventory. An archive survey has one additional question: which files should one event
+contribute? For an event-keyed product, the reader answers that question with its
+**archive file shape**. We keep the file naming with the reader so survey and scan use the
+same definition.
 
-This survey pattern applies when the archive product is event-keyed: one event
-resolves to one common path, and the reader can name that event's expected
-files. For day-keyed, timestamped, or container-style products, build a
-discovery map first and resolve files from an analyzer or a custom source
-instead of forcing the event-survey model.
+This pattern requires one event to resolve to one common archive path. Day-keyed,
+timestamped, and container-style products do not fit that event survey. For those layouts,
+build a discovery map first and resolve the files in an analyzer or custom source.
 
-The following is a complete registered skeleton. It assumes an HDF5 dataset
-named `gains`; replace that dataset contract with the one your format uses.
+The following registered reader is a complete event-keyed example. It expects an HDF5
+dataset named `gains`; replace that dataset contract with the format being added.
 
 ```python
 import h5py
@@ -96,10 +96,11 @@ class GainsReader(Reader):
 
 ```
 
-Then survey with it (`--plugin` loads an external module; `--scope` names where the
-product lives in Datatrail -- recon with `--scopes-only --match <term>` finds that, and
-`--expand` opens a container hit one level so `scopes.jsonl` lists the actual product
-datasets, e.g. the timestamped acquisitions under `complex_gains`):
+Load the reader and use it to build an inventory. The `--scope` value identifies the
+Datatrail scope that contains the product. Recon with `--scopes-only --match <term>` can
+locate that scope. If the match is a container, `--expand` opens it one level so
+`scopes.jsonl` contains the file-bearing datasets, such as timestamped acquisitions under
+`complex_gains`.
 
 ```bash
 datatrawl survey --telescope chime --reader chime-gains \
@@ -107,27 +108,28 @@ datatrawl survey --telescope chime --reader chime-gains \
     --scope <the.gains.scope> --name chime-gains
 ```
 
-Each verified row records the file's `name`, so `enumerate`/`fetch` stage exactly what
-survey verified, whatever the shape. `--reader` defaults to the telescope's canonical
-reader, which keeps every existing baseband survey invocation byte-identical. Inventories
-written before rows carried `name` still work: enumerate falls back to the baseband
-naming for them.
+Each verified inventory row records the file's `name`. The later `enumerate` and `fetch`
+steps therefore stage the name that survey verified. When `--reader` is omitted, survey
+uses the telescope's canonical reader, which preserves the existing baseband command
+path. Older inventories without a `name` field remain supported through the baseband
+naming fallback.
 
-`selection` is whatever per-survey spec the source resolved (baseband gets the
-`--freq-ids` list); a shape that is not selected that way ignores it. The two methods have
-working defaults on `Reader` -- `survey_files` refuses with an actionable error (a reader
-that never surveys needs neither), `annotate_row` does nothing.
+The source passes its resolved per-survey specification as `selection`. A baseband survey,
+for example, passes the `--freq-ids` list. A reader whose archive shape does not use that
+selection can ignore it. The default `survey_files` method raises an actionable error when
+a survey calls it, while the default `annotate_row` method makes no change. A reader used
+only with existing inventories or local files does not need to override either method.
 
-Reference: the baseband shape on `ChimeBasebandReader` (`survey_files` + `annotate_row` in
-`chime_baseband.py`), and the round-trip test in
+For a production reference, see `survey_files` and `annotate_row` on
+`ChimeBasebandReader` in `chime_baseband.py`. The round-trip behavior is tested in
 `tests/test_event_selection_and_shape.py`.
 
 ## Registering and loading
 
-The loading mechanism is the same for source, reader, and analyzer plugins. In-tree: drop
-the module in `plugins/readers/` and add it to the import list in `plugins/__init__.py`. In
-your own project (recommended for project-specific work), keep it in your repo and load it
-with:
+Readers use the same loading paths as sources and analyzers. For an in-tree reader, add the
+module to `plugins/readers/` and import it from `plugins/__init__.py`. For project-specific
+work, keep the reader in the project that uses it and load it with one of the following
+forms:
 
 ```bash
 datatrawl scan --plugin /path/to/my_reader.py ...
@@ -138,6 +140,8 @@ export DATATRAWL_PLUGINS=/path/to/my_reader.py
 #   my-reader = "mypkg.my_reader"
 ```
 
-After adding an entry point, install or reinstall the package (`pip install -e .`) so its
-metadata is visible. Once loaded, the reader shows up in `datatrawl list` / `doctor` and
-runs through the same engine (staging, dedup, quarantine, resume) as a built-in.
+After adding or changing an entry point, install or reinstall the package with
+`pip install -e .` so the environment contains the current metadata. The reader then
+appears in `datatrawl list` and `datatrawl doctor`. External and built-in readers use the
+same bounded-staging, quarantine, and resume paths. Duplicate units are an enumeration
+concern owned by the source, not the reader.

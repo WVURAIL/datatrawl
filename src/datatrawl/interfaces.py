@@ -85,7 +85,8 @@ class PluginInfo:
 class Unit:
     """One stage-able item (typically one file) the engine will process.
 
-    `key`   stable identity used for dedup + resume (e.g. the cadc: URI).
+    `key`   stable identity used for resume (e.g. the cadc: URI). A source must
+            avoid emitting duplicate logical units within one enumeration.
     `name`  local filename to stage it under.
     `meta`  source-specific fields a reader/analyzer may need (event id, freq_id,
             obs date, size, ...). Opaque to the engine.
@@ -127,11 +128,11 @@ class DataSource:
     each file right after it is analyzed.
 
     Thread-safety: with the default engine settings (download_workers=1) fetch is
-    called serially, in enumerate() order. If a user raises --download-workers,
-    the engine may call fetch() on a single source instance from several threads
-    at once, so a parallel-capable source must keep no mutable per-call state on
-    self (give each thread its own client, e.g. via threading.local, or guard a
-    shared one with a lock).
+    called serially, in enumerate() order. With multiple workers and multiple
+    staging slots, the engine may call fetch() on a single source instance from
+    several threads at once. A parallel-capable source must therefore keep no
+    mutable per-call state on self (give each thread its own client, e.g. via
+    threading.local, or guard a shared one with a lock).
     """
     info: PluginInfo
 
@@ -239,8 +240,8 @@ class Analyzer:
         processed_keys()           -> set  : Unit.key values already in the product
         begin(ctx, first_meta)             : once, when the first new file is read
         consume_file(arrays, meta) -> n    : per file; update accumulators
-        save(path)                         : atomically (re)write the product,
-                                             embedding provenance + processed keys
+        save(path)                         : persist the product, provenance, and
+                                             processed keys for recovery
         summary()                  -> dict : small human-readable status line
 
     Keeping all accumulator writes on the engine's main thread (the engine only
@@ -249,10 +250,10 @@ class Analyzer:
     Ordering: set `requires_in_order = True` if the product depends on the order
     files are consumed -- e.g. a running/trailing statistic, a CFAR baseline, or
     anything that is not a commutative accumulation. The engine then refuses the
-    parallel settings (`--download-workers`/`--max-staged-files` > 1) that would
-    deliver files in download-completion order, so such an analyzer can never
-    silently produce an order-dependent result. Leave it False (the default) for a
-    commutative accumulation like a summed PSD, which is correct at any worker count.
+    settings (`--download-workers`/`--max-staged-files` > 1) that relax the
+    source-order contract, so such an analyzer cannot silently produce an
+    order-dependent result. Leave it False (the default) for a commutative
+    accumulation like a summed PSD, which is correct at any worker count.
     """
     info: PluginInfo
     requires_in_order: bool = False
@@ -301,9 +302,9 @@ class Analyzer:
 
         Ordering: with the default engine settings the files arrive in source
         (enumerate) order. If a user raises --download-workers or
-        --max-staged-files above 1, files arrive in download-completion order, so
-        an analyzer that depends on input order (rather than a commutative
-        accumulation like a summed PSD) must only be run with the defaults.
+        --max-staged-files above 1, that ordering is no longer part of the public
+        contract. An analyzer that depends on input order (rather than a
+        commutative accumulation like a summed PSD) must use the defaults.
         """
         raise NotImplementedError
 

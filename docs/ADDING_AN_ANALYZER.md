@@ -1,9 +1,8 @@
 # Adding an analyzer
 
-An analyzer is the science plugin. It consumes arrays from a reader and writes a small,
-resumable product.
-
-The public and internal plugin type is `analyzer`.
+An analyzer contains the science operation. It consumes the arrays produced by a reader
+and accumulates a small product that can be checkpointed and resumed. The public and
+internal plugin type is `analyzer`.
 
 ## Minimal analyzer
 
@@ -17,6 +16,8 @@ from datatrawl.registry import analyzer as register_analyzer
 
 @register_analyzer
 class MyAnalyzer(AccumulatingAnalyzer):
+    _SCHEMA = "my-analyzer-v1"
+
     info = PluginInfo(
         name="my-analyzer",
         kind="analyzer",
@@ -52,11 +53,15 @@ class MyAnalyzer(AccumulatingAnalyzer):
 
     def _product(self):
         return {
+            "schema": np.array(self._SCHEMA),
             "count": self._count,
             "sum": self._sum,
         }
 
     def _restore(self, z):
+        schema = str(np.asarray(z["schema"]).item()) if "schema" in z else ""
+        if schema != self._SCHEMA:
+            raise SystemExit("existing product is not a my-analyzer-v1 product")
         self._count = int(z["count"])
         self._sum = float(z["sum"])
 
@@ -68,61 +73,66 @@ class MyAnalyzer(AccumulatingAnalyzer):
 
 ### Single pass
 
-`consume_file(arrays, meta)` receives an iterator. The staged file is deleted after
-`consume_file` returns.
+`consume_file(arrays, meta)` receives an iterator for one staged file. The engine deletes
+that staged copy after `consume_file` returns, so the analyzer must finish all work on the
+file during this call.
 
 ### Bounded memory
 
-Accumulate statistics or sparse detections. Do not save full baseband or processed data
-unless that is explicitly the product.
+Accumulate statistics or sparse detections as the arrays arrive. Holding complete
+baseband files or full processed arrays defeats the bounded streaming model and should be
+done only when that bulk output is the intended product.
 
 ### Record processed units
 
-Call:
+After one file has been consumed successfully, call:
 
 ```python
 self._record(meta)
 ```
 
-once per successfully consumed file, or implement equivalent `processed_keys()` behavior.
-This enables resume.
+Call `_record(meta)` once for that file, or implement equivalent `processed_keys()`
+behavior. These processed keys tell the engine which units the saved product already
+contains when a run resumes.
 
 ### Preserve the reader/analyzer failure boundary
 
-A probe failure happens before the analyzer sees a file, so the engine can quarantine
-that file and continue safely. If a reader fails while yielding arrays, the analyzer
-may already hold partial in-memory updates. The engine therefore records the
-quarantine and aborts without checkpointing; rerun the same command to resume from
-the last clean checkpoint and skip the quarantined file.
+A probe failure occurs before the analyzer receives the file. The engine can quarantine
+that unit and continue because no analyzer state has changed.
 
-An unexpected exception from `consume_file` is an analyzer failure, not evidence that
-the input file is corrupt. The scan stops, the file is not quarantined, and the
-current in-memory state is not checkpointed. Fix the analyzer and rerun.
+A streaming reader failure has a different boundary. The analyzer may already contain
+partial in-memory updates from that file. The engine records the quarantine and stops
+without saving the current state. Rerunning the same command loads the last completed
+checkpoint and skips the quarantined unit.
 
-If a data condition is expected, handle it explicitly in the reader or analyzer
-rather than relying on an unhandled exception to skip the file.
+An unexpected exception from `consume_file` is treated as an analyzer failure, not as
+evidence of a corrupt input. The scan stops, does not quarantine the file, and does not
+checkpoint the current in-memory state. Fix the analyzer and rerun the command. Expected
+data conditions should be handled explicitly in the reader or analyzer rather than with
+an unhandled exception.
 
 ### Declare order-dependence
 
-By default the engine delivers files in source (enumerate) order, but a user can raise
-`--download-workers` or `--max-staged-files` above 1 to overlap downloads, which delivers
-files in completion order instead. If your product depends on consume order -- a CFAR
-baseline, a running/trailing statistic, anything that is not a commutative accumulation --
-set:
+With the default staging settings, the engine delivers files in source enumeration order.
+That ordering is not part of the public contract when either `--download-workers` or
+`--max-staged-files` is above 1, and units may then arrive out of source order. Multiple
+staging slots permit fetch/analyze overlap; concurrent fetches require multiple workers
+and multiple slots. An analyzer that uses a CFAR baseline, a running or trailing
+statistic, or any other non-commutative accumulation must declare that order requirement:
 
 ```python
 class MyAnalyzer(AccumulatingAnalyzer):
     requires_in_order = True
 ```
 
-The engine then refuses those parallel settings for your analyzer (with an actionable
-error) rather than silently producing an order-dependent result. Leave it unset (the
-default, `False`) for a commutative accumulation like a summed PSD, which is correct at any
-worker count and can parallelise freely.
+The engine then refuses parallel settings for that analyzer. Leave
+`requires_in_order` at its default value of `False` for a commutative accumulation such as
+a summed PSD, because its result does not depend on file delivery order.
 
 ### Validate resume parameters
 
-If an option changes product meaning, save it and refuse incompatible resumes.
+If an option changes the meaning of the product, store that option in the product and
+refuse a resume that uses a different value.
 
 Examples:
 
@@ -134,26 +144,26 @@ Examples:
 - max frames per file;
 - calibration constants.
 
-**Do this validation in `resume()`, not `begin()`.** The engine calls
-`resume(path, ctx)` whenever the product file exists, but it skips `begin()`
-entirely when every unit is already in the product (a re-run of a finished
-product is a no-op that never reads a file). A check placed only in `begin()`
-therefore fails to guard an already-complete product: re-running it with a
-different threshold would silently report success against the *old* product
-instead of refusing. `resume()` receives `ctx`, so compare the loaded product's
-saved parameters against `ctx.options` (or `ctx.instrument`) there and raise
-`SystemExit` on a mismatch.
+Perform this validation in `resume()`, not in `begin()`. The engine calls
+`resume(path, ctx)` whenever the product exists. If the product already contains every
+selected unit, the run reads no new file and never calls `begin()`. Validation placed only
+in `begin()` would therefore miss a completed product and could report success for an old
+product built with different parameters.
 
-The minimal `AccumulatingAnalyzer` shape above uses `_restore(z)`, which has no
-`ctx` and so cannot see the current run's options. To validate run parameters,
-override `resume()` in full (reusing `self._atomic_savez()` for the crash-safe
-write) -- `plugins/analyzers/spectrum.py` is the worked reference: it stamps
-`freq_id`, `nfft`, `nyquist_zone`, and `max_frames_per_file` into the product
-and rejects any resume that disagrees.
+The `ctx` argument to `resume()` provides the current `ctx.options` and
+`ctx.instrument`. Compare those values with the parameters saved in the loaded product,
+and raise `SystemExit` when they disagree.
+
+The minimal `AccumulatingAnalyzer` above restores state through `_restore(z)`, which does
+not receive `ctx`. Override `resume()` when the analyzer must validate run parameters. The
+spectrum analyzer in `plugins/analyzers/spectrum.py` is the worked reference: it stores
+`freq_id`, `nfft`, `nyquist_zone`, and `max_frames_per_file`, validates them during resume,
+and uses `self._atomic_savez()` for its atomic product write.
 
 ### Use fan-out only when products are independent
 
-If one product should be produced per freq_id or per pilot:
+Use `plan_runs()` when one selection should produce several independent products. The
+following pattern creates one product per `freq_id` or pilot:
 
 ```python
 def plan_runs(self, ctx, spec):
@@ -166,15 +176,15 @@ def plan_runs(self, ctx, spec):
     return [[fid] for fid in freq_ids]
 ```
 
-If one product should cover all input units, use the default one-run behavior.
+If the product combines every selected input unit, keep the default single-run behavior.
 
 ### Per-event fan-out
 
-The fan-out above is per-freq_id -- one product per channel, across all events.
-An event-oriented analysis inverts that: one product per EVENT, consuming every
-selected freq_id of that event (e.g. beamforming an FRB event's baseband into a
-singlebeam and its SNR). Return one sub-selection dict per event; the sources
-understand the `events` key natively:
+The previous example creates one product per `freq_id` across all events. An
+event-oriented analysis instead needs one product per event and consumes every selected
+`freq_id` for that event. Beamforming an FRB event into a single beam and SNR is one such
+case. Return one sub-selection dictionary per event; the shipped sources interpret the
+`events` key directly.
 
 ```python
 def plan_runs(self, ctx, spec):
@@ -191,88 +201,84 @@ def plan_runs(self, ctx, spec):
     return [{"events": [ev], "freq_ids": spec} for ev in events]
 ```
 
-Each run then enumerates exactly one event's files and writes its own
-resumable product (named `ev<event>[_<freq_ids>].npz` by default). Files of one
-event arrive per-freq_id in inventory order; set `requires_in_order = True` if
-your combine depends on that order rather than accumulating commutatively.
-Against a local directory the same selection works via the filename-parsed
-event (`--source-event-regex`, default `baseband_(\d+)_`).
+Each sub-selection enumerates one event and writes an independent resumable product. The
+default name is `ev<event>[_<freq_ids>].npz`. Files for that event arrive by `freq_id` in
+inventory order when the default staging settings are used. Set
+`requires_in_order = True` if the combination depends on that ordering. For a local
+directory, the source obtains the event from the filename using `--source-event-regex`,
+whose default is `baseband_(\d+)_`.
 
-Two conventions worth keeping: `--select` stays the *freq_id* restriction for a
-per-event analyzer -- it plans events itself, so reject an event-shaped
-`--select` with a pointer rather than letting it be misread. And when runs are
-gated on a companion (next section), plan from the companion table instead of
-the inventory: only calibratable events get runs, and the same analyzer then
-works unchanged against archive and local sources. The runnable reference for
-both is [`examples/per_event_companions.py`](../examples/per_event_companions.py),
-driven end to end through the CLI by `tests/test_per_event_scan.py`.
+In this pattern, keep `--select` as the `freq_id` restriction and let `plan_runs()` choose
+the events. Reject an event-shaped `--select` with a clear instruction so it cannot be
+misread as a frequency selection.
+
+If a companion file determines which events can be processed, plan the runs from the
+companion table rather than the primary inventory. This creates products only for events
+with a valid companion and keeps the analyzer behavior the same for archive and local
+sources. [`examples/per_event_companions.py`](../examples/per_event_companions.py) is the
+runnable reference, and `tests/test_per_event_scan.py` exercises the pattern through the
+CLI.
 
 ## Run parameters (`--set`)
 
-Analyzer parameters travel through `ctx.options`. On the command line they are
-set generically, so the CLI stays analysis-agnostic:
+Analyzer parameters are passed through `ctx.options`. We use the generic `--set` option so
+the CLI does not need analysis-specific flags.
 
 ```bash
 datatrawl scan ... --analyzer my-analyzer --set bracket_hz=400 --set window=hann
 ```
 
-The mechanics:
+The parameter path has four rules:
 
-- `--set key=value` is repeatable and exists on all four run-facing commands
-  (`doctor`, `survey`, `explore`, `scan`). Sources read the same dict, which is
-  how a custom source takes its own settings
-  (see [`ADDING_A_SOURCE.md`](ADDING_A_SOURCE.md)).
-- Values get best-effort typing before they reach the analyzer: `true`/`false`
-  become bools, integers and floats are parsed, `none`/`null` drops the key,
-  and anything else stays a string. Validate and coerce in the analyzer rather
-  than assuming a type survived the command line.
-- `ctx.options` is one shared namespace. The engine resolves its own keys into
-  it first (`inventory`, `root`, `source_root`, `gpu`, ...), and `--set` pairs
-  merge last. Pick distinctive parameter names and read them with
-  `ctx.options.get("my_key", default)`.
-- A `--set` parameter that changes the meaning of the product is a resume
-  parameter: stamp it into the product and check it in `resume()` -- see
-  [Validate resume parameters](#validate-resume-parameters) above.
+- `--set key=value` is repeatable on `doctor`, `survey`, `explore`, and `scan`. Sources use
+  the same dictionary for their settings, as described in
+  [`ADDING_A_SOURCE.md`](ADDING_A_SOURCE.md).
+- The CLI applies best-effort typing. It converts `true` and `false` to Boolean values,
+  parses integers and floats, converts `none` and `null` to `None`, and leaves other values
+  as strings. The `scan` and `survey` contexts omit `None`-valued options, while `doctor`
+  and `explore` may retain them. Validate and coerce each value in the analyzer.
+- `ctx.options` is shared with engine settings. The engine first adds keys such as
+  `inventory`, `root`, `source_root`, and `gpu`; the `--set` values merge last. Use
+  distinctive parameter names and read them with `ctx.options.get("my_key", default)`.
+- A `--set` value that changes product meaning is also a resume parameter. Save it in the
+  product and check it in `resume()` as described in
+  [Validate resume parameters](#validate-resume-parameters).
 
 ## Auxiliary inputs (gains, flags, companions)
 
-Some analyses need a small companion file per unit -- calibration gains to
-beamform baseband, a flag table, an ephemeris. The engine will not stage these
-for you, deliberately: a unit is one primary file, consumed independently and
-deleted after analysis. The engine may prefetch other units within the
-`--max-staged-files` bound, but it never presents them as a grouped input. That
-unit boundary keys resume (see "Scope and non-goals" in the README). The
-supported companion pattern is a side-load owned by the analyzer:
+Some analyses need auxiliary information such as calibration gains, flags, or an
+ephemeris. The engine stages one primary file for each `Unit` and does not group that file
+with companions. This boundary is also the unit of resume, as described in "Scope and
+non-goals" in the README. Therefore, the analyzer must manage a small companion input as a
+side-load.
 
-1. **Build the lookup offline.** Survey each companion product into its own
-   inventory (a reader shape per product -- `docs/ADDING_A_READER.md`), then
-   join them to your primary inventory with your matching policy.
-   `examples/match_inventories.py` is a worked starting point that emits a
+1. **Build the lookup offline.** Survey each companion product into its own inventory,
+   using one reader shape per product as described in `docs/ADDING_A_READER.md`. Join that
+   inventory to the primary inventory with an explicit matching policy.
+   `examples/match_inventories.py` provides a starting point and writes
    `companions.jsonl` keyed by event.
-2. **Load the lookup once, in `begin()`.** A dict of event -> companion path
-   (pre-staged on /arc) or event -> CADC URI (fetched on demand) is small;
-   hold it in memory.
-3. **Resolve per file, in `consume_file()`.** Every unit's `meta` carries its
-   `event` (archive and local sources both set it), so the lookup key is
-   `meta["event"]`. If you fetch on demand, cache per event -- with per-event
-   fan-out each run touches exactly one event, so that is one fetch per
-   product -- and clean up what you staged; the engine only deletes what IT
-   staged.
-4. **Validate on resume.** A companion that changes the product's meaning
-   (which gain solution was applied) is a resume parameter like any other:
-   stamp its identity into the product and refuse a mismatched resume.
+2. **Load the lookup once in `begin()`.** Keep a small mapping from event to a companion
+   path already staged on `/arc`, or from event to a CADC URI that will be fetched on
+   demand.
+3. **Resolve the companion in `consume_file()`.** Archive and local sources both include
+   the event in `meta`, so use `meta["event"]` as the lookup key. When fetching on demand,
+   cache the result by event. Per-event fan-out then requires one companion fetch per
+   product. Remove any companion copy staged by the analyzer, because the engine deletes
+   only files that it staged.
+4. **Validate the companion during resume.** A different gain solution or other companion
+   changes the product meaning. Store its identity in the product and refuse a resume when
+   that identity changes.
 
-If the companion is not small -- if every unit requires another bulk input
-alongside it -- you are fighting the one-primary-file-per-`Unit` model.
-Pre-combine the products upstream or use a different engine rather than
-enlarging the side-load.
+This side-load pattern is intended for small auxiliary products. If each unit requires a
+second bulk input, pre-combine the inputs upstream or use an engine that represents grouped
+units. Expanding the side-load would remove the storage bound that this model is designed
+to provide.
 
-**Day-keyed archives: resolve lazily instead.** Some companion products are
-organized by DAY, not by event -- CHIME calibration gains, for instance, live
-as one dataset per date with the files inside. There the offline join
-dissolves: the recon map (`--scopes-only --match ... --expand --name gains`)
-already lists exactly which days exist, and the analyzer resolves its
-companion per event with one archive call:
+**Resolve day-keyed archives lazily.** Some companions are organized by day rather than by
+event. CHIME calibration gains, for example, use one dataset per date. In this case, the
+recon map produced by `--scopes-only --match ... --expand --name gains` supplies the
+available days. The analyzer selects a day for each event and resolves its files with one
+archive call.
 
 ```python
 import json
@@ -288,17 +294,17 @@ gain = pick(names)          # YOUR policy: calibrator, noise_weighted, ...
 uri = f"{cp}/{gain}"        # fetch with cadcget; cache per event
 ```
 
-`DATATRAIL.files()` is the programmatic `datatrail ps -s` -- use it (via
-`datatrawl.plugins.sources`) rather than scraping the table or importing
-dtcli internals; the adapter is the one sanctioned dtcli surface. ok=False
-means the service did not answer, which is never the same as "no gain".
-Which file on a day is THE companion is science policy, not archive
-mechanics -- same rule as always.
+`DATATRAIL.files()` provides the programmatic form of `datatrail ps -s`. Import it through
+`datatrawl.plugins.sources` rather than parsing command output or importing dtcli
+internals. An `ok=False` result means the service did not answer; it does not establish
+that the dataset contains no gain file. The analyzer must also define the science policy
+for choosing one companion when a day contains several candidates.
 
-Steps 2--4 are worked, runnable, and CLI-tested in
-[`examples/per_event_companions.py`](../examples/per_event_companions.py):
-companion loaded in `begin()`, resolved off `meta["event"]`, stamped into the
-product, and a reassigned companion refusing the resume.
+[`examples/per_event_companions.py`](../examples/per_event_companions.py) implements steps
+2 through 4. It loads the lookup in `begin()`, resolves the companion from
+`meta["event"]`, saves the companion identity in the product, and refuses a resume after
+that identity is reassigned. The example is exercised through the CLI in
+`tests/test_per_event_scan.py`.
 
 ## Loading external analyzers
 
@@ -320,29 +326,31 @@ or package entry point:
 my-analyzer = "my_project.datatrawl_plugins.my_analyzer"
 ```
 
-Install or reinstall the package after changing its entry points so the metadata is
-visible to `datatrawl`:
+After adding or changing an entry point, install or reinstall the package so the
+environment contains the current metadata:
 
 ```bash
 pip install -e /path/to/my_project
 ```
 
-Loading a single file by path (`--plugin .../my_analyzer.py`) cannot resolve
-package-relative imports (`from . import ...`): the file is loaded standalone, with
-no parent package. If your plugin lives in a package (importing siblings or shared
-helpers), make the package importable (`pip install -e .`, or put its root on
-`PYTHONPATH`) and load it by module name (`--plugin my_project.my_analyzer`) or via
-the entry point above.
+Loading a Python file by path treats it as a standalone module. It therefore cannot
+resolve package-relative imports such as `from . import ...`. If the analyzer imports
+sibling modules or shared package helpers, make the package importable with
+`pip install -e .` or by adding its root to `PYTHONPATH`. Then load the dotted module name
+with `--plugin my_project.my_analyzer`, or declare the entry point shown above.
 
-The packaged form is available ready-made: the template repository
+The
 [`WVURAIL/datatrawl-analyzer-template`](https://github.com/WVURAIL/datatrawl-analyzer-template)
-ships the src layout, the declared entry point, and a smoke suite that runs the
-real engine on synthetic data. "Use this template", rename per its checklist,
-`pip install -e .`, and the analyzer is discoverable with no `--plugin` flag.
+repository provides an installable package layout, a declared entry point, and a smoke
+suite that runs the engine on synthetic data. Create a repository from that template,
+follow its rename checklist, and run `pip install -e .`. The analyzer will then be
+discoverable without a `--plugin` flag.
 
 ## Preflight checklist
 
-Before archive scale, keep the bounded smoke-test product separate from the full run:
+Before using an analyzer at archive scale, run one bounded file and frame through the real
+pipeline. Write this smoke-test product to a path that will not be reused for the full
+analysis.
 
 ```bash
 PLUGIN=/path/to/my_analyzer.py   # or: my_project.datatrawl_plugins.my_analyzer
@@ -356,6 +364,7 @@ datatrawl scan --plugin "$PLUGIN" \
   --out smoke/my-analyzer.npz
 ```
 
-Run the identical smoke command a second time. It should skip the completed unit
-and avoid duplicating output. For the uncapped analysis, omit the bounds and use a
-fresh output path; capped and uncapped products are intentionally incompatible.
+Run the same smoke command a second time. A correct resume implementation skips the
+completed unit and leaves the accumulated result unchanged. For the full analysis, remove
+the bounds and use a fresh output path. The capped and uncapped runs represent different
+products and must not be resumed into one file.

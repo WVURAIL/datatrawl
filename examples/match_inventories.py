@@ -1,34 +1,36 @@
 """
-Worked example: match companion products (gains, N2, flags) to a primary
-inventory, by event -- the offline join step of the auxiliary-inputs pattern
-in docs/ADDING_AN_ANALYZER.md.
+Match a primary inventory to a companion inventory by event.
 
-datatrawl deliberately does not do this join for you (README: "Scope and
-non-goals"). WHICH companion corresponds to an event -- nearest in time?
-covering interval? maximum staleness? -- is science policy, and this file is
-where that policy lives, in YOUR copy, under your control. The policy coded
-below is the simplest defensible default:
+This is the offline join used by the auxiliary-input pattern in
+docs/ADDING_AN_ANALYZER.md. `datatrawl` does not choose a gain, flag set, or N2
+product for the analysis because that choice is part of the science. This
+example makes one specific choice:
 
-    for each event in the primary inventory, pick the companion row with the
-    latest obs_date <= the event's obs_date (nearest-preceding by day),
-    falling back to the overall earliest companion if none precedes.
+    For each primary event, use the latest companion date that is not later
+    than the event date. If none exists, record the earliest companion and a
+    negative lag.
 
-Two honest caveats before you trust it for calibration:
+The negative-lag fallback keeps the event visible instead of silently dropping
+it. The worked per-event analyzer rejects negative lags by default, so it will
+not use that future-dated companion unless its policy is changed.
 
-  * `obs_date` is DAY-granularity (survey parses it from the archive common
-    path). If your matching needs finer than a day, put a real timestamp
-    column in the companion rows via your shape reader's `survey_files`
-    fields / `annotate_row`, and key on that here instead.
-  * Same-day is treated as "preceding". Decide whether that is right for your
-    product.
+There are three assumptions to check before using this for calibration:
 
-Inputs are the inventories survey wrote (one per product -- see
-docs/ADDING_A_READER.md for surveying a non-baseband product). Output is
-companions.jsonl: one row per primary event,
+  * `obs_date` has day resolution because survey derives it from the archive
+    common path. Add a real timestamp in `survey_files` or `annotate_row` if the
+    policy needs time-of-day resolution.
+  * A companion from the same day counts as preceding.
+  * If several companion rows have the same date, the last one in inventory
+    order wins. Replace that tie rule if those rows are scientifically distinct.
+
+Both inputs are JSONL inventories written for their respective products. The
+output, `companions.jsonl`, contains one row per dated primary event:
+
     {"event": ..., "companion": {"name": ..., "common_path": ...,
                                  "obs_date": ...}, "lag_days": ...}
-which an analyzer loads once in begin() and resolves per unit off
-meta["event"].
+
+An analyzer can load that table once in `begin()` and look up each unit by
+`meta["event"]`.
 
 Run:
     python examples/match_inventories.py \
@@ -55,7 +57,7 @@ def _day(row):
     try:
         return dt.date.fromisoformat(str(row.get("obs_date", ""))[:10])
     except ValueError:
-        return None    # "unknown" -> unmatchable; counted and reported
+        return None    # Keep an unknown date visible in the final skipped count.
 
 
 def main() -> int:
@@ -73,8 +75,9 @@ def main() -> int:
     if not companions:
         raise SystemExit(f"no dated rows in {args.companion} -- nothing to match")
 
-    # one row per primary EVENT (a baseband inventory has many rows per event;
-    # the companion choice is per event, not per freq_id)
+    # A baseband inventory has many rows per event. The match is per event, not
+    # per freq_id. setdefault deliberately keeps the first date; inventory rows
+    # for one event are expected to agree on obs_date.
     events: dict = {}
     for r in _rows(args.primary):
         events.setdefault(str(r["event"]), _day(r))
@@ -84,8 +87,8 @@ def main() -> int:
         for ev, day in sorted(events.items()):
             if day is None:
                 continue
-            # nearest-preceding by day; earliest companion as the fallback.
-            # <-- THE POLICY. Edit here.
+            # This loop is the matching policy: nearest preceding day, with the
+            # earliest known companion retained as a visible future fallback.
             chosen = companions[0][1]
             lag = (day - companions[0][0]).days
             for cd, cr in companions:

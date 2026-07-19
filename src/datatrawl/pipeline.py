@@ -8,15 +8,15 @@ Unit in a selection it:
     read  (Reader -> iterable of arrays)
     analyze (Analyzer.consume_file accumulates)
     delete the staged file immediately
-    checkpoint the Analyzer's product every N files (atomic, via the analyzer)
+    ask the Analyzer to checkpoint its product every N successfully consumed files
 
 Scratch usage is bounded by a semaphore: at most `max_staged_files` files are on
 disk at once, enforced across all downloader threads (a slot is freed only after
 the consumer deletes the file). The default (`max_staged_files=1`,
 `download_workers=1`) holds exactly one file at a time, in source order. Raising
-either trades scratch (bounded at max_staged_files x largest file) and ordering
-for download/analyze overlap; with >1 worker the analyzer sees files in
-completion order, so an analyzer that needs source order must run with the default.
+either setting relaxes the source-order contract. Multiple staging slots allow
+download/analyze overlap, and concurrent fetches require multiple workers and
+multiple slots. An analyzer that needs source order must use the defaults.
 
 Restartable: on restart the analyzer re-loads its product, reports which units it
 already holds, and the engine processes only the rest.
@@ -158,18 +158,18 @@ def run(
 
     # Correctness guard: an analyzer that depends on consume order (a CFAR
     # baseline, any running/trailing statistic) declares requires_in_order. The
-    # default 1 worker / 1 slot delivers files in source order; >1 of either
-    # delivers them in download-completion order, which would silently change such
-    # an analyzer's product. Refuse the combination rather than produce a wrong
-    # result. (A commutative analyzer leaves the flag False and parallelises freely.)
+    # default 1 worker / 1 slot delivers files in source order; raising either
+    # setting relaxes that public contract and could silently change an
+    # order-dependent product. Refuse the combination rather than produce a wrong
+    # result. (A commutative analyzer leaves the flag False.)
     if getattr(analyzer, "requires_in_order", False) and (
             download_workers > 1 or max_staged_files > 1):
         name = getattr(getattr(analyzer, "info", None), "name", type(analyzer).__name__)
         raise SystemExit(
             f"analyzer {name!r} requires in-order file delivery, which is "
             f"incompatible with --download-workers {download_workers} / "
-            f"--max-staged-files {max_staged_files} (these deliver files in "
-            f"download-completion order). Rerun with --download-workers 1 and "
+            f"--max-staged-files {max_staged_files} (these settings relax the "
+            f"source-order contract). Rerun with --download-workers 1 and "
             f"--max-staged-files 1 (the defaults).")
 
     # Make engine-level run parameters visible to the analyzer BEFORE resume, so it

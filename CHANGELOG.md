@@ -9,6 +9,12 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Changed
 
+- Rewrote the README, extension guides, operational guides, example
+  documentation, formal manuals, and CLI help in a consistent technical voice.
+  The same pass bounded the resume and atomic-write claims by the analyzer
+  contract, corrected duplicate-unit and `nothing to do` behavior, clarified
+  recon container rows and `DATATRAIL.files()` results, and removed unsupported
+  fixed certificate and session lifetimes. No engine behavior changed.
 - Documentation follow-up from an external-user walkthrough: repaired the
   reader extension example; aligned bounded-prefetch terminology across the
   README, troubleshooting guide, analyzer guide, CLI help, and architecture

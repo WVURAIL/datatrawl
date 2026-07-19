@@ -8,30 +8,36 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-yellow.svg" alt="license: MIT"></a>
 </p>
 
-Storage-safe archive trawling for resumable telescope-data analysis.
+Large archive scans create two practical problems. Staged files can fill the
+available scratch space, and an interrupted session can require repeated work.
+We designed `datatrawl` to bound the scratch use and preserve completed work.
 
-*Storage-safe* means the scratch footprint is bounded: by default at most one
-staged file exists at a time, and it is deleted after it has been streamed.
-Raise `--max-staged-files` only when you explicitly want bounded prefetching.
+By *storage-safe*, we mean that the scratch footprint has an explicit bound. By
+default, one staged file exists at a time. The engine deletes that file after it
+has been streamed. Raising `--max-staged-files` enables prefetching while keeping
+the number of staged files bounded.
 
-*Resumable* means each product is atomically checkpointed every
-`--checkpoint-every` files, default 50, and at run end; an interrupted run
-continues from the product's recorded unit keys.
+By *resumable*, we mean that the analyzer records the unit keys committed to its
+product. The engine asks it to save every `--checkpoint-every` successfully
+consumed files, with a default interval of 50 files, and again at the end of a
+normal run that consumed at least one new file. The supplied analyzer base class
+and spectrum analyzer replace those checkpoints atomically. After an
+interruption, the next run starts from the last completed checkpoint and skips
+the unit keys already recorded there.
 
-`datatrawl` is a downstream run layer for safely scanning Datatrail/CADC data
-one primary file per unit. Datatrail remains the archive authority: it knows which
-scopes exist, which datasets are registered, what storage policies apply, and how
-a dataset resolves to files. `datatrawl` starts after that archive map exists. It
-builds an analysis-specific inventory, verifies the expected units, consumes one
-unit at a time through the reader and analyzer, checkpoints the small product,
-and resumes after CANFAR/CADC interruptions. Fetching may run ahead only within
-the explicit `--max-staged-files` bound.
+`datatrawl` operates after Datatrail has mapped the archive. Datatrail defines
+the available scopes and datasets, applies the storage policies, and resolves a
+dataset to its files. We use that archive map to build an analysis-specific
+inventory, and the survey verifies the expected units. The engine then processes
+one primary file per unit, deletes each staged copy, and checkpoints the
+resulting product. Fetching can run ahead only within the
+`--max-staged-files` bound.
 
-The science itself lives in the analyzer, which is usually your own plugin kept
-in your own project.
+The analyzer contains the scientific calculation. In most applications, we
+keep that analyzer as a plugin in the project that uses `datatrawl`.
 
-The intended audience is CHIME/FRB users: baseband data, `freq_id`s, and
-Datatrail scopes are used here without introduction.
+This documentation is written for CHIME/FRB users. We therefore use baseband
+data, `freq_id`, and Datatrail scopes without a general radio-astronomy primer.
 
 ```text
 Datatrail scope(s)
@@ -63,22 +69,25 @@ Datatrail scope(s)
   <img src="assets/architecture.svg" alt="A datatrawl run: instrument, source, and reader are provided; you write the analyzer. The fixed engine processes one unit at a time with bounded staging and writes analyzer-defined resumable products." width="900">
 </p>
 
+We separate the archive mechanics from the scientific calculation using four
+pieces.
+
 | Piece | Meaning |
 |---|---|
-| **Instrument** | Telescope geometry: band, channelization, Nyquist zone, feed count, NFFT. Pure YAML. |
-| **Source** | Where the data lives and how to list + stage it, such as `cadc-datatrail` or `local`. |
-| **Reader** | Converts one staged file into arrays + per-file metadata, such as `chime-baseband`. |
-| **Analyzer** | The science: consumes arrays and writes a small, resumable product, such as `spectrum`. |
+| **Instrument** | Stores the telescope geometry in YAML: band, channelization, Nyquist zone, feed count, and NFFT. |
+| **Source** | Lists and stages the data from a location such as `cadc-datatrail` or `local`. |
+| **Reader** | Converts one staged file into arrays and per-file metadata, such as `chime-baseband`. |
+| **Analyzer** | Consumes the arrays and writes the resumable scientific product, such as `spectrum`. |
 
-Plus two Datatrail terms a survey works against:
+A survey also uses two Datatrail terms.
 
 | Term | Meaning |
 |---|---|
 | **Scope** | Archive namespace, such as `chime.event.baseband.raw`. |
 | **Dataset** | A registered name inside a scope. It may be a file-bearing dataset or a larger container. |
 
-A survey turns scopes and datasets into a local **inventory**: a JSONL list of
-verified units to scan.
+A survey records the selected scopes and datasets in a local **inventory**. The
+inventory is a JSON Lines (JSONL) list of the verified units available to scan.
 
 ## Install
 
@@ -93,35 +102,36 @@ pip install -e ".[survey,examples,dev]"
 cadc-get-cert -u <your_cadc_username>
 ```
 
-The `cadc-datatrail` source drives `datatrail`, which needs a one-time site
-configuration before the archive example below works:
+The archive example uses the `cadc-datatrail` source. This source calls
+Datatrail, which requires a one-time site configuration.
 
 ```bash
 datatrail config init --site canfar
 ```
 
-On CANFAR, use `--site canfar`. Elsewhere, use the site appropriate for your
-environment, such as `--site local` or `--site chime`. This writes
-`~/.datatrail/config.yaml`.
+Use `--site canfar` on CANFAR. For another environment, select its configured
+site, such as `--site local` or `--site chime`. Datatrail writes this setting to
+`~/.datatrail/config.yaml`. The
+[datatrail-cli documentation](https://github.com/CHIMEFRB/datatrail-cli)
+describes the full setup.
 
-The offline `pytest` check and the `local` source do not need CADC or Datatrail
-configuration. See [datatrail-cli](https://github.com/CHIMEFRB/datatrail-cli) for
-the full Datatrail setup.
+The offline tests and the `local` source do not require a CADC certificate or a
+Datatrail configuration.
 
-For GPU analyzers, `datatrawl` uses the CuPy your CANFAR image already ships. If
-the image has no CuPy installed, run:
+For a GPU analyzer, we use the CuPy installation supplied by the CANFAR image.
+If CuPy is not installed, run:
 
 ```bash
 datatrawl setup-cupy --install
 ```
 
-This detects the image's CUDA version and installs the matching wheel.
+This command detects the available CUDA major version and installs the
+corresponding CuPy wheel. A scan does not install CuPy automatically.
 
 ## Verify the install
 
-The worked [CHIME spectrum example](#example-a-chime-single-freq_id-spectrum)
-below runs against the real archive, so it needs the CADC certificate from the
-install step. The install itself can be checked without an account:
+We first verify the installed package without contacting the archive. These
+checks do not require a CADC account.
 
 ```bash
 datatrawl --version   # installed release
@@ -130,25 +140,27 @@ datatrawl doctor      # readiness + the combinations ready to run
 pytest -q             # reader -> analyzer -> checkpoint -> resume on synthetic data
 ```
 
-`pytest` needs no CADC account and no data of your own, so it is the quickest
-confirmation that the streaming pipeline works end to end. `make test` and
-`make smoke` wrap the tests and the `list` / `doctor` checks.
+The test suite runs the reader, analyzer, checkpoint, and resume paths on
+synthetic data. `make test` runs this suite. `make smoke` runs the `list` and
+`doctor` checks.
 
 ## Example: a CHIME single-freq_id spectrum
 
-This is a worked end-to-end example. It uses a single scope and a single
-`freq_id`, stages a handful of files, and accumulates an averaged power spectrum.
-That `freq_id` carries a known narrowband tone, a DTV pilot, at a fixed frequency.
-If the tone shows up in the PSD, the whole path works:
+This example tests the archive path with one scope and one `freq_id`. We stage a
+small number of files and accumulate an averaged power spectral density (PSD).
+The selected channel can contain a narrowband digital television (DTV) pilot.
+When that feature is present, its location in the PSD provides an end-to-end
+check of the inventory, staging, reader, analyzer, and frequency mapping.
 
 ```text
 survey -> inventory -> scan -> bounded staging -> reader -> analyzer
        -> checkpoint -> resume -> plot
 ```
 
-This example runs against the real archive, so it needs the CADC certificate from
-[Install](#install). With no account yet, use [Verify the install](#verify-the-install)
-for an offline path that exercises the same pipeline.
+The example contacts the CHIME archive and therefore requires the CADC
+certificate and Datatrail configuration from [Install](#install). The checks in
+[Verify the install](#verify-the-install) exercise the pipeline without archive
+access.
 
 ```text
 scope:      chime.event.baseband.raw
@@ -159,7 +171,8 @@ selection:  freq_id 844
 product:    time- and feed-averaged 2^14-point PSD
 ```
 
-Build the inventory, inspect it, then run a bounded scan:
+We first build the inventory, inspect it, and run a scan with bounded per-file
+work.
 
 ```bash
 # 1. Build the inventory for a few events.
@@ -179,7 +192,7 @@ datatrawl scan \
   --max-frames-per-file 5
 ```
 
-Plot it:
+The scan writes an NPZ product. The following code plots the PSD.
 
 ```bash
 # The product is results/chime/spectrum/844.npz.
@@ -202,29 +215,34 @@ plt.show()
 PY
 ```
 
-A strong narrow feature should appear in the freq_id-844 band at about
-470.309 MHz. That is the pilot tone.
+For retrievable events that contain the DTV signal, a narrow feature should
+appear near 470.309 MHz in the `freq_id` 844 band. This observation checks the
+processing path for this configuration; it is not an absolute calibration of
+the spectrum.
 
-Re-run the identical `scan` command to verify resume. It should report that the
-product is already complete.
+Re-run the same `scan` command to test resume. If the first run completed, the
+second run reports that this product is already complete.
 
-Because this example uses `--max-frames-per-file 5`, the product is deliberately
-bounded. For a later uncapped scan, remove the cap and use a fresh `--out` (or
-delete the bounded product); `datatrawl` refuses to mix capped and uncapped runs.
+The example uses `--max-frames-per-file 5`, so the product contains only the
+first five analysis frames from each file. For an uncapped scan, remove this
+option and write to a new `--out`, or remove the bounded product first. The
+spectrum analyzer rejects a resume that would combine capped and uncapped runs.
 
-On a headless session, such as a CANFAR script rather than a notebook cell,
-`plt.show()` may do nothing. The important call is `plt.savefig(...)`.
+In a headless CANFAR session, `plt.show()` may not display a window. The
+`plt.savefig(...)` call still writes the figure.
 
-Some of the oldest events may have aged off CADC storage. The survey reports
-those as `resolved-but-empty` and skips them, so the inventory and scan proceed
-on whatever is still retrievable. `rows written` can therefore be fewer than
-`--max-events`; that is expected, not an error.
+An event can resolve in Datatrail while CADC returns none of its expected files.
+This condition can be temporary, or the files may no longer be retained. The
+survey leaves the event out of the inventory for that run. It reports a
+nonterminal case as `resolved-but-empty` and retries that case on a later survey
+until the empty-event attempt limit is reached. Therefore, `rows written` can be
+smaller than `--max-events`.
 
 ## Running local files
 
-If you already have baseband `.h5` files on disk, for example staged under
-`/arc`, you can run the real pipeline with no survey at all via the `local`
-source:
+When the baseband `.h5` files are already on disk, the `local` source can run
+the same reader and analyzer without an archive survey. For example, the files
+may already be staged under `/arc`.
 
 ```bash
 # What is there?
@@ -236,98 +254,105 @@ datatrawl scan --source local --source-root <dir> \
   --select <freq_id> --max-frames-per-file 5
 ```
 
-Without `--tmp-dir`, each invocation receives a unique scratch directory. The
-base directory is chosen from `DATATRAWL_TMPDIR`, then a writable `/scratch`,
-then the operating system temporary directory. Pass `--tmp-dir` when a site has
-a preferred node-local scratch location. An explicit `--tmp-dir` is used as-is,
-so concurrent scans must receive distinct paths. Automatically created scratch
-directories are removed at process exit; if a hard kill prevents cleanup, the
-leftover directory is scratch and safe to delete.
+Without `--tmp-dir`, each scan creates a unique scratch directory. It selects
+the base directory in this order: `DATATRAWL_TMPDIR`, a writable `/scratch`, and
+the operating system temporary directory. Pass `--tmp-dir` when the system has
+a preferred node-local scratch location. Because an explicit path is used
+directly, concurrent scans must use different explicit paths.
 
-By default, the local source assumes filenames contain the selected `freq_id` as
-an integer before `.h5`, for example:
+The command removes an automatically created scratch directory when the scan
+exits normally. A hard kill can leave that directory behind. This directory
+contains staged scratch files and can be removed after the scan has stopped.
+
+By default, the `local` source reads the selected `freq_id` from the final
+integer before `.h5`. For example:
 
 ```text
 baseband_<event>_<freq_id>.h5
 ```
 
-The default matching pattern is roughly:
+The default regular expression is:
 
 ```text
 _(\d+)\.h5$
 ```
 
-For a different local naming convention, pass `--source-freq-id-regex`.
+Use `--source-freq-id-regex` for a different filename convention.
 
 ## Commands
 
-Run any command with `--help` for its full options.
+Each command provides its full option list with `--help`.
 
 | Command | Purpose |
 |---|---|
-| **`datatrawl list`** | Show registered telescopes, sources, readers, and analyzers, including any loaded with `--plugin`. Start here to see what exists. |
-| **`datatrawl doctor`** | Readiness check. On its own, it explains the survey/scan choices and lists ready combinations. With `--telescope ... --source ... --reader ... --analyzer ...`, it gives the prerequisite checklist for one concrete pipeline. |
-| **`datatrawl survey`** | Build the run inventory: walk one or more scopes, verify expected files by metadata, omit missing ones, and cache `inventory.jsonl` + `inventory.meta.json`. It does **not** bulk-download archive data. Re-running resumes from the cached event listing; add `--re-enumerate` to discover newly registered events. |
-| **`datatrawl survey --scopes-only`** | Recon: map the archive before committing to anything. Lists datasets across scopes (`--telescope` narrows to that telescope's live scopes; omit it to walk everything), `--match` filters by name, `--expand` opens a container one level so its children land in the map, `--name` labels the map `scopes-<name>.jsonl`. Nothing is enumerated or downloaded; every row resolves with `datatrail ps <scope> <dataset> -s`. |
-| **`datatrawl explore`** | Summarize what a source holds before scanning: freq_ids present, file counts, date span, and total volume. It works on a survey inventory or a local directory. |
-| **`datatrawl scan`** | Storage-safe run loop: stage files within the configured scratch bound, process each unit through the reader and analyzer, delete each staged copy after use, and checkpoint the product atomically. Transient fetch failures retry on rerun; unreadable files are quarantined. |
+| **`datatrawl list`** | Lists the registered telescopes, sources, readers, and analyzers, including plugins loaded with `--plugin`. |
+| **`datatrawl doctor`** | Checks whether the requested pieces are ready. Without piece-specific options, it lists the available combinations. With `--telescope ... --source ... --reader ... --analyzer ...`, it checks one pipeline. |
+| **`datatrawl survey`** | Walks one or more scopes, verifies the expected files from their metadata, and writes `inventory.jsonl` and `inventory.meta.json`. It does not bulk-download the archive files. A repeated survey uses the cached event listing; `--re-enumerate` rebuilds that listing to include newly registered events. |
+| **`datatrawl survey --scopes-only`** | Maps the archive scopes and datasets before an event survey. `--telescope` limits the live scopes, `--match` filters the names, `--expand` opens each retained container by one level, and `--name` writes `scopes-<name>.jsonl`. This mode does not enumerate event files or download bulk data. File-bearing rows can be queried with `datatrail ps <scope> <dataset> -s`. |
+| **`datatrawl explore`** | Reports the available `freq_id` values, file count, date span, and total volume for an inventory or local directory. |
+| **`datatrawl scan`** | Stages files within the configured scratch bound, passes each unit through the reader and analyzer, deletes the staged copy, and asks the analyzer to checkpoint its product. The supplied analyzers replace those checkpoints atomically. Fetch failures remain pending for a later run. By default, unreadable files are recorded in the quarantine ledger. |
 
-To recover or extend a run, re-run the identical `scan` command.
+To continue a run, repeat the same `scan` command with the same product-defining
+parameters.
 
 ## Scope and non-goals
 
-Knowing what datatrawl deliberately does NOT do is as useful as knowing what it
-does, so the boundary is stated here rather than discovered mid-design:
+We keep the engine boundary explicit because it determines which analyses fit
+this execution model.
 
 * **A unit is one primary file.** The reader and analyzer consume one unit at a
-  time. The engine may prefetch other independent units, but never beyond
-  `--max-staged-files`, and never presents a grouped set of primary files as one
-  unit. That unit boundary is what keys resume and quarantine.
-* **datatrawl never joins data products.** It will build you a verified
-  inventory per product type (survey with the right reader shape -- see
-  [`docs/ADDING_A_READER.md`](docs/ADDING_A_READER.md)), but *which* companion
-  file corresponds to a unit (the nearest gain solution, the covering
-  calibration interval, a staleness cap) is science policy, not archive
-  mechanics. That matching is your code, over the inventories --
-  [`examples/match_inventories.py`](examples/match_inventories.py) is a
-  worked starting point.
-* **Auxiliary inputs are the analyzer's job.** An analyzer that needs a
-  per-event companion (gains, flags) side-loads it itself, keyed off the
-  unit's metadata -- the pattern is in
+  time. The engine can prefetch independent units, but it does not exceed
+  `--max-staged-files` or present several primary files as one unit. The unit key
+  is the resume identity and, unless the source supplies `quarantine_key`, the
+  quarantine identity.
+* **The engine does not join data products.** A survey can build a verified
+  inventory for each product type when the reader defines the corresponding
+  file shape. See [`docs/ADDING_A_READER.md`](docs/ADDING_A_READER.md). The
+  choice of companion file, such as the nearest gain solution or the covering
+  calibration interval, is part of the analysis. We perform that match in the
+  project code; [`examples/match_inventories.py`](examples/match_inventories.py)
+  provides a worked starting point.
+* **The analyzer loads auxiliary inputs.** When an analysis needs gains, flags,
+  or another per-event companion, the analyzer loads that file using the unit
+  metadata. The pattern is described in
   [`docs/ADDING_AN_ANALYZER.md`](docs/ADDING_AN_ANALYZER.md#auxiliary-inputs-gains-flags-companions).
-* **Selection is freq_ids and/or events, exactly.** `--select 614,706`,
-  `--select 506-844`, `--select events:349382977`, or the dict form a
-  `plan_runs` returns (`{"events": [...], "freq_ids": ...}`). Filters are
-  ANDed and exact; nothing is inferred from the shape of a bare integer.
+* **Selections use explicit `freq_id` and event values.** Supported examples
+  include `--select 614,706`, `--select 506-844`, and
+  `--select events:349382977`. A `plan_runs` method can return the structured
+  form `{"events": [...], "freq_ids": ...}`. The filters are combined with a
+  logical AND, and a bare integer is not assigned an inferred meaning beyond the
+  analyzer's selection grammar.
 
-If your workflow fits "stream verified one-file units into a resumable product",
-datatrawl carries the archive mechanics for you. If it needs paired bulk staging
-as one unit, that is a different engine, not a missing flag.
+This engine fits analyses that stream verified one-file units into a resumable
+product. An analysis that must stage several primary files as one unit requires
+a different unit model.
 
 ## What Datatrail does
 
-Archive discovery -- walking scopes, listing datasets, showing the files a
-file-bearing dataset carries -- is Datatrail's job, not `datatrawl`'s:
+Datatrail provides the archive view used by `datatrawl`. It walks scopes, lists
+datasets, and reports the files attached to a file-bearing dataset.
 
 ```bash
 PAGER=cat datatrail ls <scope>                  # datasets in a scope
 PAGER=cat datatrail ps <scope> <dataset> -s     # files in a file-bearing dataset
 ```
 
-See [`docs/DATATRAIL_BOUNDARY.md`](docs/DATATRAIL_BOUNDARY.md) for what Datatrail
-owns versus what `datatrawl` owns, including how containers ("larger datasets")
-differ from file-bearing datasets.
+[`docs/DATATRAIL_BOUNDARY.md`](docs/DATATRAIL_BOUNDARY.md) defines the division
+between Datatrail and `datatrawl`. It also distinguishes a container, which
+Datatrail calls a larger dataset, from a file-bearing dataset.
 
 ## Extending datatrawl for your own analysis
 
-`datatrawl` ships only the generic CHIME spectrum path. Your actual science
-usually lives in **your** project as a plugin. You can load that plugin with:
+`datatrawl` includes a generic CHIME spectrum analyzer. For a project-specific
+calculation, we implement the scientific method as a plugin in that project.
+The plugin can be loaded in three ways:
 
-- `--plugin`;
-- the `DATATRAWL_PLUGINS` environment variable;
+- the `--plugin` option;
+- the `DATATRAWL_PLUGINS` environment variable; or
 - a package entry point.
 
-Nothing in this repository needs to change for project-specific analysis code.
+This arrangement keeps project-specific analysis code outside the `datatrawl`
+repository.
 
 ### Which piece do I need to write?
 
@@ -342,40 +367,43 @@ Nothing in this repository needs to change for project-specific analysis code.
 | New telescope with CHIME-like files | **Instrument YAML**, possibly **analyzer** |
 | New telescope and new file format | **Instrument YAML + reader + analyzer** |
 
-Two realistic examples:
+Two examples show how we apply this division.
 
-- **An F-statistic DTV pilot detector** using the 23 pilot `freq_id`s on
+- **An F-statistic DTV pilot detector** over the 23 nominal pilot positions in
   `chime.event.baseband.raw` and `chime.scheduled.baseband.raw` needs a new
-  **analyzer**. The shipped `cadc-datatrail` source and `chime-baseband` reader
-  already deliver the data.
+  **analyzer**. The included `cadc-datatrail` source and `chime-baseband` reader
+  already provide the required archive and file-format paths.
 - **A GBO N² burst detector** on `gbo.acquisition.processed`, using all
-  `freq_id`s and looking for a short energy spike, likely needs a new
-  **source**, a new **reader**, and a new **analyzer**.
+  `freq_id` values to test for a short energy increase, requires a new
+  **analyzer**. If its archive layout and file format differ from the included
+  CHIME baseband path, it also requires a new **source** and **reader**.
 
 ### Quick path: using datatrawl from your own project
 
-Most project-specific baseband work only needs a new analyzer, and the fastest
-start is the template repository:
-[**WVURAIL/datatrawl-analyzer-template**](https://github.com/WVURAIL/datatrawl-analyzer-template).
-Click "Use this template", rename per its checklist, and `pip install -e .` --
-the entry point in its `pyproject.toml` makes your analyzer appear in
-`datatrawl list analyzers` with no `--plugin` flag. The template ships a
-complete working analyzer (`freq_id-peak`: averaged PSD + peak bin, with
-`--set` handling and strict resume validation) and a smoke test that runs the
-real engine on synthetic data, so `pytest -q` proves the integration before
-any archive access.
+Most project-specific baseband analyses require only an analyzer. The
+[**WVURAIL/datatrawl-analyzer-template**](https://github.com/WVURAIL/datatrawl-analyzer-template)
+provides an installable starting point. Select "Use this template," follow its
+renaming checklist, and run `pip install -e .`. The entry point in
+`pyproject.toml` then registers the analyzer with `datatrawl list analyzers`
+without a `--plugin` option.
 
-For ad-hoc loading without packaging, `--plugin` takes either a path to a
-standalone `.py` file (which cannot use package-relative imports) or a dotted
-module name from an installed project; `DATATRAWL_PLUGINS` does the same from
-the environment. The loading mechanics, the preflight checklist (doctor, a
-one-file smoke scan, rerun to verify resume), and the full contract live in
-[`docs/ADDING_AN_ANALYZER.md`](docs/ADDING_AN_ANALYZER.md).
+The template includes the `freq_id-peak` analyzer. It computes an averaged PSD
+and its peak bin, accepts parameters through `--set`, and validates those
+parameters on resume. Its smoke test runs the engine on synthetic data. Thus,
+`pytest -q` can test the plugin integration before archive access.
+
+For an unpackaged test, `--plugin` accepts either a standalone `.py` path or a
+dotted module from an installed project. A standalone file cannot use
+package-relative imports. The `DATATRAWL_PLUGINS` environment variable provides
+the same loading choices. [`docs/ADDING_AN_ANALYZER.md`](docs/ADDING_AN_ANALYZER.md)
+describes the loading rules, the preflight checks, a one-file scan, resume
+testing, and the analyzer contract.
 
 ### Minimal analyzer shape
 
-An analyzer subclasses `AccumulatingAnalyzer` and implements five small
-lifecycle hooks. This complete example accumulates mean frame power:
+An accumulating analyzer subclasses `AccumulatingAnalyzer` and implements the
+accumulator and lifecycle methods. The following example computes the mean
+power over the streamed frames.
 
 ```python
 import numpy as np
@@ -426,51 +454,58 @@ class MeanPowerAnalyzer(AccumulatingAnalyzer):
         return {"frames": self._count, "mean_power": mean}
 ```
 
-Parameters reach the analyzer as `ctx.options` via `--set key=value`. If an
-option changes the meaning of the product (`nfft`, a detector threshold, a
-window), stamp it into the product and refuse to resume when it differs.
+The engine passes `--set key=value` parameters to the analyzer through
+`ctx.options`. When a parameter changes the meaning of the product, such as a
+detector threshold or window, we record that parameter in the product. The
+analyzer must reject a resume when the recorded value differs.
 
-The complete runnable example, the full contract (single pass, bounded memory,
-order-dependence, fan-out), resume validation, run parameters, and auxiliary
-inputs are in [`docs/ADDING_AN_ANALYZER.md`](docs/ADDING_AN_ANALYZER.md).
+[`docs/ADDING_AN_ANALYZER.md`](docs/ADDING_AN_ANALYZER.md) provides the runnable
+example and the complete contract. It covers single-pass accumulation, bounded
+memory, input ordering, product fan-out, resume validation, run parameters, and
+auxiliary inputs.
 
 ## Guides
 
 | Guide | Purpose |
 |---|---|
-| [`docs/ADDING_AN_ANALYZER.md`](docs/ADDING_AN_ANALYZER.md) | Add the science plugin. This is the common case. |
-| [`WVURAIL/datatrawl-analyzer-template`](https://github.com/WVURAIL/datatrawl-analyzer-template) | Start your own analyzer project: installable, entry-point-discovered, tested against the engine. |
-| [`docs/ADDING_A_SOURCE.md`](docs/ADDING_A_SOURCE.md) | Add data from a new location, scope layout, or filesystem convention. |
-| [`docs/ADDING_A_READER.md`](docs/ADDING_A_READER.md) | Add support for a new file format. |
-| [`docs/ADDING_A_TELESCOPE.md`](docs/ADDING_A_TELESCOPE.md) | Add a new instrument geometry YAML. |
-| [`docs/DATATRAIL_BOUNDARY.md`](docs/DATATRAIL_BOUNDARY.md) | Map a use case onto Datatrail + datatrawl responsibilities. |
-| [`docs/TROUBLESHOOTING.md`](docs/TROUBLESHOOTING.md) | Long runs, self-healing, quarantine, expired certs, and recovery. |
-| [`docs/CLI_OUTPUT.md`](docs/CLI_OUTPUT.md) | Interpret `doctor`, `survey`, `explore`, and `scan` output in SSH, `tmux`, `nohup`, and CANFAR logs. |
+| [`docs/ADDING_AN_ANALYZER.md`](docs/ADDING_AN_ANALYZER.md) | Implements a new scientific calculation. This is the usual extension. |
+| [`WVURAIL/datatrawl-analyzer-template`](https://github.com/WVURAIL/datatrawl-analyzer-template) | Starts an installable analyzer project with entry-point discovery and engine tests. |
+| [`docs/ADDING_A_SOURCE.md`](docs/ADDING_A_SOURCE.md) | Connects a new data location, scope layout, or filesystem convention. |
+| [`docs/ADDING_A_READER.md`](docs/ADDING_A_READER.md) | Adds support for a new file format. |
+| [`docs/ADDING_A_TELESCOPE.md`](docs/ADDING_A_TELESCOPE.md) | Defines a new instrument geometry in YAML. |
+| [`docs/DATATRAIL_BOUNDARY.md`](docs/DATATRAIL_BOUNDARY.md) | Assigns archive and execution responsibilities to Datatrail and `datatrawl`. |
+| [`docs/TROUBLESHOOTING.md`](docs/TROUBLESHOOTING.md) | Diagnoses long runs, quarantine records, expired certificates, and interrupted-run recovery. |
+| [`docs/CLI_OUTPUT.md`](docs/CLI_OUTPUT.md) | Interprets `doctor`, `survey`, `explore`, and `scan` output in SSH, `tmux`, `nohup`, and CANFAR logs. |
 
 ## Design notes
 
-`datatrawl` drives Datatrail through the CLI's machine-readable mode --
-`datatrail ls --json` / `ps --json` (datatrail-cli >= 0.11), spawned from the
-same interpreter that imports datatrawl -- with a hard per-call timeout
-(`DATATRAWL_DATATRAIL_TIMEOUT`, seconds, default 300) so a wedged call reads
-as an outage, never as an empty archive. The adapter in
+`datatrawl` calls the machine-readable Datatrail commands,
+`datatrail ls --json` and `datatrail ps --json`, through datatrail-cli 0.11 or
+later. We spawn these commands from the same Python interpreter that imports
+`datatrawl`. Each call has a timeout set by
+`DATATRAWL_DATATRAIL_TIMEOUT`, with a default of 300 s.
+
+When a call times out or returns a malformed response, the adapter classifies
+the result as an unavailable archive response rather than an empty dataset. The
+adapter in
 [`src/datatrawl/plugins/sources/_datatrail.py`](src/datatrawl/plugins/sources/_datatrail.py)
-is the single sanctioned surface; its docstring carries the engineering
-rationale, and the CHANGELOG the migration history.
+defines this interface. Its module documentation gives the design rationale,
+and [`CHANGELOG.md`](CHANGELOG.md) records the migration history.
 
 ## Build documentation
 
-The formal data sheet and user guide (`docs/Datatrawl_DS001_v1_3_Data_Sheet.tex`,
-`docs/Datatrawl_UG001_v1_3_User_Guide.tex`) share the WVURAIL house style with
-the PilotProxy documents. Generated PDFs are ignored by git. Build locally with:
+The formal data sheet and user guide are
+`docs/Datatrawl_DS001_v1_3_Data_Sheet.tex` and
+`docs/Datatrawl_UG001_v1_3_User_Guide.tex`. We use the same WVURAIL document
+style for these files and the PilotProxy documents. Git ignores the generated
+PDFs. Build them locally with:
 
 ```bash
 make docs        # latexmk; PDFs in docs/out/
 ```
 
-The toolchain on Debian/Ubuntu (verified package set --- each package below
-is required; `--no-install-recommends` with anything less fails on
-`lmodern.sty`):
+The following Debian/Ubuntu package set produced both documents in our tested
+environment:
 
 ```bash
 sudo apt-get install --no-install-recommends \
@@ -478,19 +513,20 @@ sudo apt-get install --no-install-recommends \
     texlive-fonts-recommended texlive-pictures lmodern latexmk
 ```
 
-The repository graphics (architecture diagram, banner, logo, social card)
-are TikZ-sourced: `assets/*.tex` are the sources of truth and the committed
-`assets/*.svg` are generated from them --- wordmarks and taglines are real,
-editable text, and the trawl-net mark itself lives once in
-`assets/trawlmark.tikz` as a shared TikZ pic. Regenerate after editing with `make diagram` (additionally needs
-`poppler-utils` for `pdftocairo`; `pip install scour` optionally shrinks the
-output). CANFAR session images ship no TeX and no root, so build
-documentation and diagrams locally, not in a session --- the committed SVGs
-are already the `make diagram` output.
+The architecture diagram, banner, logo, and social card are generated from the
+TikZ sources in `assets/*.tex`. The wordmarks and taglines remain editable text.
+The shared trawl-net mark is defined once in `assets/trawlmark.tikz`. After a
+source edit, run `make diagram` to regenerate the committed SVG files. This
+target requires `pdftocairo` from `poppler-utils`. Installing `scour` with pip
+is optional and reduces the SVG file size.
+
+The CANFAR images used for this project did not provide TeX or root access. We
+therefore build the documents and diagrams in a local environment and commit
+the generated SVG files.
 
 ## Release history and citation
 
-Release notes are maintained in [`CHANGELOG.md`](CHANGELOG.md). A machine-readable
-software citation is provided in [`CITATION.cff`](CITATION.cff).
+We record release changes in [`CHANGELOG.md`](CHANGELOG.md) and provide the
+software citation metadata in [`CITATION.cff`](CITATION.cff).
 
-The package and runtime report the same version with `datatrawl --version`.
+The installed package reports its runtime version with `datatrawl --version`.

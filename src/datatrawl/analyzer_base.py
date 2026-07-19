@@ -4,7 +4,7 @@ checkpoint it to a `.npz`.
 
 Almost every analysis has the same shape: allocate accumulators, fold in each
 file's arrays in one streaming pass, and write the result so an interrupted run
-can resume. The mechanical parts of that -- a crash-safe atomic write, reloading
+can resume. The mechanical parts of that -- atomic replacement, reloading
 on resume, and tracking which files are already in the product -- are identical
 everywhere, so they live here. Subclass and write only the science:
 
@@ -18,7 +18,7 @@ everywhere, so they live here. Subclass and write only the science:
 `save()`, `resume()`, and `processed_keys()` then come for free. An analysis that
 needs custom resume validation or derived fields at save time (see the `spectrum`
 analyzer) overrides `save()`/`resume()` directly and reuses `self._atomic_savez()`
-for the crash-safe write.
+for the same replacement behavior.
 """
 from __future__ import annotations
 
@@ -34,12 +34,12 @@ from .interfaces import Analyzer, RunContext
 
 class AccumulatingAnalyzer(Analyzer):
     def __init__(self) -> None:
-        self._keys: list[str] = []     # Unit keys already in the product (resume/dedup)
+        self._keys: list[str] = []     # Unit keys already committed (resume skip)
         self._names: list[str] = []    # human-readable file names, for provenance
 
-    # -- provenance / dedup --------------------------------------------------
+    # -- provenance / resume bookkeeping ------------------------------------
     def _record(self, meta: Mapping[str, Any]) -> None:
-        """Call once per file in consume_file() to log it for resume + dedup."""
+        """Call once per file in consume_file() to log it for resume skipping."""
         key = str(meta.get("unit_key", meta.get("unit_name", "?")))
         self._keys.append(key)
         self._names.append(str(meta.get("unit_name", key)))
@@ -47,11 +47,14 @@ class AccumulatingAnalyzer(Analyzer):
     def processed_keys(self) -> set:
         return set(self._keys)
 
-    # -- crash-safe write (reuse this even when you override save) ------------
+    # -- atomic replacement (reuse this even when you override save) ----------
     @staticmethod
     def _atomic_savez(path: str, **arrays: Any) -> None:
-        """Write a `.npz` via a temp file + atomic rename, so a kill mid-write
-        never leaves a half-written product behind."""
+        """Write a `.npz` via a temp file + atomic rename.
+
+        For an ordinary process interruption, the prior checkpoint remains in
+        place until replacement. This does not claim power-loss durability.
+        """
         d = os.path.dirname(os.path.abspath(path))
         fd, tmp = tempfile.mkstemp(suffix=".npz", dir=d)
         os.close(fd)

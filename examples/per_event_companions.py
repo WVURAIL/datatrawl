@@ -1,36 +1,39 @@
 """
-Worked per-event analyzer with a companion side-load.
+Demonstrate one product per event with a side-loaded companion table.
 
-The runnable reference for two docs/ADDING_AN_ANALYZER.md sections:
+This file is the runnable reference for two sections of
+docs/ADDING_AN_ANALYZER.md:
 
-  * "Per-event fan-out"  -- plan_runs returns one `{"events": [ev],
-    "freq_ids": spec}` sub-selection per event, so each event becomes its own
-    resumable product (`ev<event>[_<freq_ids>].npz`) consuming every selected
-    freq_id of that event. Both sources understand the dict natively; against
-    a local directory the event is parsed from filenames
-    (--source-event-regex).
+  * `plan_runs` returns one `{"events": [ev], "freq_ids": spec}` selection per
+    event. Each selection receives a fresh analyzer and a product named
+    `ev<event>[_<freq_ids>].npz` by default. The CADC and local sources both
+    understand this selection shape; the local source parses event IDs from
+    filenames with `--source-event-regex`.
 
-  * "Auxiliary inputs (gains, flags, companions)" -- the analyzer, not the
-    engine, owns its per-event companion: the event -> companion lookup
-    (companions.jsonl, e.g. from examples/match_inventories.py) is loaded once
-    in begin(), resolved per file off meta["event"], stamped into the product,
-    and VALIDATED on resume -- if the table now assigns this event a different
-    companion, folding new files in would silently mix calibrations, so the
-    resume refuses instead.
+  * The analyzer owns the companion lookup. It loads `companions.jsonl`, looks
+    up units through `meta["event"]`, stores the chosen companion name in the
+    product, and compares that name on resume. If the table later assigns a
+    different name, the resume is refused rather than combining two named
+    companions in one product.
 
-Runs are planned FROM the companion table, gated on freshness: an event whose
-companion is staler than --set max_gain_lag_days is skipped, visibly, before a
-byte is staged. Planning from the table (rather than the inventory) also makes
-the same analyzer work unchanged against archive and local sources.
+Runs are planned from the companion table and filtered by
+`--set max_gain_lag_days`. An event outside the accepted lag range is reported
+before any data for that event is staged. Planning from the table also avoids
+requiring an archive inventory merely to discover event IDs, so the same
+analyzer can run against archive or local sources.
 
-For DAY-keyed companion archives (e.g. CHIME calibration gains: one dataset
-per date), skip the join table entirely and resolve lazily in begin() with
-DATATRAIL.files() -- see "Day-keyed archives" in docs/ADDING_AN_ANALYZER.md.
+The companion *name* is the resume identity in this example. A real analysis
+should stamp every field that can change the result, such as a checksum,
+calibration version, or full URI. It should also decide how a changed lag value
+affects resume compatibility.
 
-The science here is a stand-in -- mean |x|^2 over the stream, standing where a
-real analysis would apply the companion (e.g. beamform baseband with a gain
-solution). Every datatrawl integration point around it is real, and
-tests/test_per_event_scan.py runs this file end to end through the CLI.
+For a day-keyed companion archive, the analyzer can replace the join table with
+a lazy `DATATRAIL.files()` lookup in `begin()`; see "Day-keyed archives" in
+docs/ADDING_AN_ANALYZER.md.
+
+The statistic here is only a stand-in: mean |x|^2 over the streamed frames. It
+does not read or apply the companion data. The fan-out, lookup, product, and
+resume paths are exercised end to end by tests/test_per_event_scan.py.
 
 Try it on synthetic local files (see the test for a complete recipe):
 
@@ -39,8 +42,9 @@ Try it on synthetic local files (see the test for a complete recipe):
         --source-root /path/to/files --select 614,706 \
         --set companions=companions.jsonl --set max_gain_lag_days=30
 
-`--select` stays the freq_id restriction: a per-event analyzer plans events
-itself, so an event-shaped --select is rejected with a pointer, not misread.
+`--select` remains the freq_id restriction because the analyzer obtains its
+event list from the companion table. An event-shaped `--select` is rejected
+with an explanation.
 """
 from __future__ import annotations
 
@@ -55,7 +59,7 @@ from datatrawl.registry import analyzer as register_analyzer
 
 
 def _load_companions(ctx: RunContext) -> dict:
-    """event -> companion row, from --set companions=<path>."""
+    """Load event -> row from --set companions=<path>; later duplicates win."""
     path = (ctx.options or {}).get("companions")
     if not path or not os.path.exists(path):
         raise SystemExit(
@@ -88,7 +92,7 @@ class PerEventCompanionDemo(AccumulatingAnalyzer):
         self._power_sum = 0.0
         self._n_frames = 0
 
-    # -- planning: one run per fresh-companion event --------------------------
+    # -- planning: one run per event that passes the lag policy ----------------
     def plan_runs(self, ctx: RunContext, spec):
         if isinstance(spec, str) and spec.strip().lower().startswith(
                 ("event:", "events:")):
@@ -102,11 +106,11 @@ class PerEventCompanionDemo(AccumulatingAnalyzer):
             lag = float(c.get("lag_days", -1))
             if 0 <= lag <= max_lag:
                 kept.append(ev)
-            else:                                    # visible, never silent
+            else:                                    # Report every policy exclusion.
                 print(f"[per-event-demo] skipping event {ev}: companion lag "
                       f"{lag:g}d outside 0..{max_lag:g}d")
-        # An event in the table but absent from the data simply enumerates
-        # zero units; the engine reports it and moves on.
+        # A table event absent from the selected source enumerates zero units;
+        # the CLI reports that product selection and moves on.
         return [{"events": [ev], "freq_ids": spec} for ev in kept]
 
     # -- per-run lifecycle -----------------------------------------------------
@@ -116,12 +120,12 @@ class PerEventCompanionDemo(AccumulatingAnalyzer):
             c = _load_companions(ctx)[self._event]
             self._companion_name = str(c["companion"]["name"])
             self._companion_lag = float(c.get("lag_days", -1))
-            # A real analysis stages + reads the companion here, from
-            # c["companion"]["common_path"] (cadcget) or a pre-staged path.
+            # A real analysis would stage and read the companion here, using
+            # c["companion"]["common_path"] or a pre-staged path.
 
     def consume_file(self, arrays, meta) -> None:
         ev = str(meta["event"])
-        if ev != self._event:                        # per-event fan-out invariant
+        if ev != self._event:                        # Enforce one event per product.
             raise RuntimeError(f"unit from event {ev} in a {self._event} run")
         for frame in arrays:
             self._power_sum += float(np.mean(np.abs(frame) ** 2))
@@ -147,8 +151,7 @@ class PerEventCompanionDemo(AccumulatingAnalyzer):
         self._n_frames = int(z["n_frames"])
 
     def summary(self):
-        # printed on the engine's per-product "done:" line -- a worked example
-        # should show its result there, not "{}"
+        # This mapping appears on the engine's per-product completion line.
         return {"event": self._event, "companion": self._companion_name,
                 "lag_days": self._companion_lag, "files": len(self._names),
                 "mean_power": round(self._product()["mean_power"], 4)}
@@ -159,10 +162,8 @@ class PerEventCompanionDemo(AccumulatingAnalyzer):
         z = np.load(path, allow_pickle=False)
         if str(z.get("analysis")) != "per-event-demo":
             raise SystemExit(f"{path} was written by a different analysis")
-        # The side-loaded companion is a resume parameter: if the table now
-        # assigns this event a DIFFERENT companion, new files would be folded
-        # in under one calibration and old ones under another -- silent
-        # corruption. Refuse, with both names.
+        # The selected companion name is a resume parameter in this example.
+        # Refuse a changed assignment and report both names.
         current = _load_companions(ctx).get(str(z["event"]), {})
         now = str(current.get("companion", {}).get("name"))
         if now != str(z["companion_name"]):

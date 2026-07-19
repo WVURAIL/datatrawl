@@ -125,61 +125,64 @@
 {\color{TrawlAmber}\hrule height 1.2pt}
 \vspace{8pt}
 
-{\small\color{TrawlGray}This product specification defines the v1.0.0 streaming
-engine contract. datatrawl is a downstream run layer: the archive authority
-(e.g.\ Datatrail/CADC) remains the source of record for what data exists;
-datatrawl fetches, streams, and deletes copies under an explicit staged-file-count
-bound.
-Throughput is source-, network-, and analyzer-dependent and should be measured
-on the target system.}
+{\small\color{TrawlGray}Long archive analyses must operate within scratch-space
+limits and must continue after interrupted sessions. This specification defines
+the datatrawl v1.0.0 engine contract for that problem. Datatrail/CADC remains
+the source of record for archive contents. datatrawl builds an
+analysis-specific inventory, processes staged copies under an explicit
+file-count bound, checkpoints the result, and removes each copy after use.
+Throughput depends on the source, network, file size, and analyzer, and must be
+measured on the target system.}
 
 \section{Features}
 \begin{itemize}
-  \item Streams telescope archives under an explicit
-        \textbf{staged-file-count bound}: by default, stage and analyze one
-        file at a time; optionally prefetch up to
-        \code{--max-staged-files}; delete every staged copy after consumption.
-  \item \textbf{Resumable products}: the analyzer owns its product file,
-        re-loads it on restart, and skips already-accumulated units; a
-        kill at any point loses at most the work since the last checkpoint.
-  \item Four-choice run model --- \field{telescope}, \field{source},
-        \field{reader}, \field{analyzer} --- covers the whole configuration
-        surface; \code{datatrawl doctor} makes each choice and its
-        prerequisites legible before compute time is spent.
-  \item \textbf{Pluggable}: sources, readers, analyzers, and telescopes
-        register through the \code{datatrawl.plugins} entry-point group or an
-        explicit \code{--plugin} module path; external packages (e.g.\
-        PilotProxy) ship analyzers without modifying datatrawl.
-  \item \textbf{Ordering contract}: analyzers declare
-        \field{requires_in_order}; the engine refuses parallel-fetch settings
-        that would deliver files out of source order to such analyzers.
-  \item \textbf{Persistent inventories}: \code{datatrawl survey} writes a
-        named inventory directory recording the telescope/source/reader
-        choices, so \code{datatrawl scan} needs only the analyzer and the
-        inventory name. Current scans load the units selected for each product
-        into memory before staging begins.
+  \item \textbf{Bounded staging}: the default run stages and analyzes one file
+        at a time. \code{--max-staged-files} permits bounded prefetching, and
+        the engine removes each staged copy after it is consumed.
+  \item \textbf{Resumable products}: the analyzer owns the product and records
+        the units committed at each checkpoint. A repeated command skips those
+        recorded units. Work completed after the last checkpoint may be
+        repeated after an interruption.
+  \item \textbf{Four-part run model}: a run selects a \field{telescope},
+        \field{source}, \field{reader}, and \field{analyzer}.
+        \code{datatrawl doctor} checks the selected combination before a long
+        scan is started.
+  \item \textbf{External plugins}: sources, readers, and analyzers register
+        through the \code{datatrawl.plugins} entry-point group or an explicit
+        \code{--plugin} module path. A project can therefore supply its own
+        analysis without modifying datatrawl.
+  \item \textbf{Ordering contract}: an order-dependent analyzer sets
+        \field{requires_in_order}. The engine then rejects settings that may
+        deliver files in download-completion order.
+  \item \textbf{Persistent inventories}: \code{datatrawl survey} records the
+        telescope, source, and reader in a named inventory directory. A later
+        \code{datatrawl scan} needs the inventory and analyzer. The current
+        engine loads the units selected for one product into memory before
+        staging begins.
   \item \textbf{Selection}: \field{freq_id}s and/or events, one grammar
         across sources --- \code{614,706}, \code{506-844},
         \code{events:349382977}, or the dict form a \field{plan_runs}
         returns; filters are exact and ANDed, and malformed input fails
         loudly with the grammar named.
-  \item \textbf{Archive discovery (recon)}: \code{survey --scopes-only}
-        maps scopes and datasets with no event enumeration and no download;
+  \item \textbf{Archive discovery}: \code{survey --scopes-only}
+        maps scopes and datasets without enumerating events or downloading data;
         \code{--match} filters by name, \code{--expand} opens containers one
-        level, \code{--name} labels the map, and a scope datatrail fails to
-        answer for is reported as an INCOMPLETE map, never as emptiness.
+        level, and \code{--name} labels the map. If Datatrail does not answer
+        for a scope, datatrawl marks the map INCOMPLETE instead of treating the
+        missing response as an empty scope.
   \item \textbf{Reader-owned archive file shape}: which files one event
         contributes is declared by the reader (\field{survey_files});
-        inventory rows are self-describing (each records its file
-        \field{name}), so a scan stages exactly what the survey verified.
-  \item Atomic product writes (temporary file in the product directory, then
-        atomic replace), unique automatically created staging directories
-        (concurrent scans using the defaults cannot delete each other's
-        files), and analyzer-owned unit-key provenance.
+        each inventory row records its file \field{name}. A later scan uses
+        that recorded name rather than reconstructing the current naming rule.
+  \item The supplied analyzer base class and spectrum analyzer checkpoint
+        through a temporary file followed by \field{os.replace}; automatically
+        created staging directories are unique to one invocation; and the
+        analyzer owns unit-key provenance.
   \item Pure-Python core (\code{numpy}, \code{h5py}, \code{pyyaml});
         CANFAR/CADC access and GPU acceleration are optional extras.
 \end{itemize}
 
+\clearpage
 \section{What datatrawl Is and Is Not}
 \begin{tabularx}{\linewidth}{L{0.30\linewidth} Y}
 \toprule
@@ -188,9 +191,9 @@ on the target system.}
               resumable product, and deletes the staged copy after use. The
               engine may overlap that serial consumption with an explicitly
               bounded fetch queue. \\
-\textbf{Is} & A contract between an engine and plugins: lifecycle, ordering,
-              resume, and provenance rules that make long unattended runs
-              safe. \\
+\textbf{Is} & A contract between an engine and plugins. The contract defines
+              lifecycle, ordering, resume, and provenance behavior for long
+              unattended runs. \\
 \textbf{Is not} & An archive. Datatrail/CADC remain the authority on what data
               exists and where; datatrawl never mutates archive state. \\
 \textbf{Is not} & A scheduler or workflow manager. One \code{scan} is one
@@ -229,10 +232,13 @@ on the target system.}
   (prod.north east) to[bend right=18]
   node[right,font=\scriptsize]{resume} (ana.south east);
 \end{tikzpicture}
-\caption{Bounded streaming loop. The engine drives the lifecycle; plugins own
-archive access, file decoding, and science.}
+\caption{datatrawl processing sequence. The source stages one unit, the reader
+streams arrays from that unit, and the analyzer updates its product. The engine
+removes the staged copy and asks the analyzer to checkpoint at the configured
+interval.}
 \end{figure}
 
+\clearpage
 \section{Operating Limits and Contracts}
 \begin{tabularx}{\linewidth}{L{0.34\linewidth} L{0.22\linewidth} Y}
 \toprule
@@ -243,11 +249,12 @@ prefetch depth; refused when the analyzer sets \field{requires_in_order}. \\
 Staged-input footprint & Approximately $N S_{\max}$ & $N$ is
 \code{--max-staged-files} and $S_{\max}$ is the largest selected file;
 product-checkpoint temporary space and filesystem overhead are additional. \\
-Download workers & 1 (default) & \code{--download-workers} parallelizes fetch
-only; all accumulator writes stay on the engine's main thread (no analyzer
-locking). Refused for in-order analyzers. \\
-Checkpoint interval & 50 files & \code{--checkpoint-every}; each checkpoint is
-an atomic \code{save()} of the full product. \\
+Download workers & 1 (default) & Adds fetch threads; concurrent fetches also
+require more than one staging slot. Accumulator writes stay on the engine's
+main thread (no analyzer locking). Refused for in-order analyzers. \\
+Checkpoint interval & 50 consumed files & \code{--checkpoint-every}; the
+engine calls the analyzer's \code{save()} for the full product after this many
+successful units. \\
 Delivery order & Source order & Guaranteed when
 \code{--download-workers=1} and \code{--max-staged-files=1}. With relaxed
 settings, delivery order is not part of the public contract and may follow
@@ -256,10 +263,11 @@ Staging directory & Unique when automatic & Without \code{--tmp-dir}, each
 scan receives a unique directory under \code{DATATRAWL_TMPDIR}, writable
 \code{/scratch}, or the operating-system temporary directory. An explicit
 \code{--tmp-dir} is used as-is and must not be shared by concurrent scans. \\
-Product write & Atomic & A temporary file in the product directory atomically
-replaces the prior checkpoint; a kill never leaves a partial product. \\
-Resume gate & Strict & \field{resume()} must raise on an existing but
-incompatible product; two configurations can never mix into one file. \\
+Supplied product write & Atomic replacement & The base class and spectrum
+analyzer write a temporary file in the product directory and then call
+\field{os.replace}. An external analyzer owns the equivalent obligation. \\
+Resume gate & Analyzer-defined & \field{resume()} must reject an existing
+product when a changed parameter would alter its meaning. \\
 Inventory memory & Selection-sized & Inventory rows persist on disk between
 commands, but \code{scan} materializes the units selected for each product in
 memory before processing. Memory use grows with the selected inventory. \\
@@ -272,9 +280,9 @@ memory before processing. Memory use grows with the selected inventory. \\
 \toprule
 \textbf{Command} & \textbf{Function} \\
 \midrule
-\code{datatrawl list} & Everything available at a glance; subcommands
+\code{datatrawl list} & List the registered components; subcommands
 \code{telescopes}, \code{readers}, \code{analyzers}, \code{sources}. \\
-\code{datatrawl doctor} & Startup checklist and ready-to-go combinations; with
+\code{datatrawl doctor} & Report usable combinations; with
 \code{--telescope/--source/--reader/--analyzer}, the checklist for one chosen
 combination. \\
 \code{datatrawl explore} & Summarize an existing archive inventory or a local
@@ -295,25 +303,24 @@ that wheel into the active environment. \\
 
 \section{Plugin Interfaces}
 \subsection{Analyzer lifecycle}
-The analyzer owns its product file: it writes it, re-loads it on resume, and
-reports which units it already contains. The engine drives:
+The analyzer owns the product file. It writes the product, reloads it on
+resume, and reports the units already committed. The engine calls:
 \begin{lstlisting}
 resume(path, ctx) -> bool     # load an existing, compatible product
 processed_keys()  -> set      # Unit.key values already accumulated
 begin(ctx, first_meta)        # once, at the first new file
 consume_file(arrays, meta)->n # per file; update accumulators
-save(path)                    # atomic (re)write, provenance embedded
+save(path)                    # persist a resumable product + provenance
 summary()         -> dict     # one human-readable status line
 \end{lstlisting}
 Selection hooks \field{resolve_selection} and \field{plan_runs} let an
 analyzer interpret \code{--select} and split it into independent, individually
 resumable products (e.g.\ one product per \field{freq_id}).
 
-\importantbox{Set \field{requires_in_order = True} for any product that is not
-a commutative accumulation (running statistics, CFAR baselines, trailing
-windows). The engine then refuses \code{--download-workers}\,/\,%
-\code{--max-staged-files} above 1, so an order-dependent analyzer can never
-silently consume files in download-completion order.}
+\importantbox{Set \field{requires_in_order = True} when the product depends on
+consume order, including running statistics, CFAR baselines, and trailing
+windows. The engine then rejects \code{--download-workers}\,/\,%
+\code{--max-staged-files} above 1.}
 
 \subsection{Source and Reader}
 \begin{itemize}
@@ -344,14 +351,18 @@ analyzers this way.
 
 \section{Provenance and Resume Semantics}
 Each analyzer owns its product and resume contract. It must persist every
-\field{Unit.key} it has committed and every parameter or invariant that changes
-the product's meaning; \field{resume()} must reject an incompatible existing
-product. The supplied accumulating base class and spectrum analyzer implement
-this contract for their supported fields. The engine obtains committed keys
-through \field{processed_keys()}, skips matching units, continues accumulation,
-and checkpoints atomically. The failure guarantee is therefore: \textbf{a kill
-at any instant loses at most the files consumed since the last checkpoint, and
-never corrupts the product}.
+\field{Unit.key} committed to the product and each parameter that changes the
+product's meaning. \field{resume()} must reject an incompatible product. The
+supplied accumulating base class provides committed-key storage and atomic NPZ
+replacement. The spectrum analyzer extends it with parameter validation for its
+supported fields. On restart, the engine obtains the committed keys through
+\field{processed_keys()} and skips matching units. A process
+interruption can therefore require the files consumed since the last completed
+checkpoint to be processed again. In the supplied implementations, the previous
+checkpoint remains available because replacement occurs only after the new
+temporary product has been written. An external analyzer must provide equivalent
+atomic-replacement behavior if it is to make the same recovery claim for an
+ordinary process interruption.
 
 \section{Environment and Dependencies}
 \begin{tabularx}{\linewidth}{L{0.24\linewidth} L{0.30\linewidth} Y}
@@ -376,12 +387,13 @@ Python $\geq$ 3.9. Continuous integration runs the full suite on CPython
 
 \section{Compliance and Testing}
 \begin{itemize}
-  \item Full pytest suite exercises the engine loop, kill/resume, ordering
+  \item The pytest suite exercises the engine loop, kill/resume, ordering
         refusal, atomic writes, inventory handling, CLI output, the built-in
         plugins, the selection grammar, recon (including outage handling),
         and the per-event/companion composition end to end through the CLI.
-  \item Release job builds sdist+wheel, runs \code{twine check}, installs the
-        wheel in a clean venv, and verifies the Datatrail dependency
+  \item The release job builds the source distribution and wheel, runs
+        \code{twine check}, installs the wheel in a new virtual environment,
+        and verifies the Datatrail dependency
         contract.
   \item License: MIT. Machine-readable citation in \code{CITATION.cff};
         release notes in \code{CHANGELOG.md}.

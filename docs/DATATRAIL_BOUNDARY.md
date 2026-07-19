@@ -1,13 +1,14 @@
 # Datatrail boundary
 
-`datatrawl` should not reinvent Datatrail.
+The clean boundary is simple: `datatrawl` should not try to become Datatrail.
 
-Datatrail owns archive registration and discovery. `datatrawl` owns analysis inventories
-and storage-safe execution.
+Datatrail owns archive registration and discovery. `datatrawl` turns that
+archive view into an analysis inventory and runs the analysis within a bounded
+staging footprint.
 
 ## Datatrail owns
 
-Datatrail answers:
+Datatrail answers questions about the archive:
 
 - What scopes exist?
 - Which datasets are registered under a scope?
@@ -27,37 +28,47 @@ PAGER=cat datatrail ps <scope> <dataset> -s
 PAGER=cat datatrail scout <scope> <dataset>
 ```
 
-datatrawl reaches this hierarchy without reinventing it: recon
-(`survey --scopes-only`, with `--expand` to open a container one level) writes
-the `ls` view as a reusable map, and `DATATRAIL.files(scope, dataset)` --
-importable from `datatrawl.plugins.sources` -- is the programmatic `ps -s`,
-with a contract that never lets a service outage read as emptiness.
+`datatrawl` uses those interfaces rather than duplicating them. Recon
+(`survey --scopes-only`) writes the `ls` view to a reusable map. Adding
+`--expand` opens each matched name one level and writes any children it finds.
+`DATATRAIL.files(scope, dataset)`, imported from
+`datatrawl.plugins.sources`, provides the programmatic `ps -s` view and returns
+an explicit `ok` value so callers can distinguish an answered empty listing
+from a call that did not answer.
+
+There is one important limit to the map. A plain recon row may name a container,
+not a file-bearing dataset. Even an expanded map retains a container row when
+no children are listed or the child query fails. Treat the map as discovery;
+use `files()` or `datatrail ps` to determine whether a row actually has files.
 
 ## datatrawl owns
 
-`datatrawl` answers:
+`datatrawl` answers analysis-run questions:
 
 - Which registered files are relevant to this analysis?
-- Which expected units are present?
-- Which files are missing and should be omitted?
-- Which files have already been analyzed?
+- Which expected units were verified for this inventory?
+- Which units have already been analyzed?
 - How can the analysis run within disk quota?
 - How does the run resume after CANFAR/CADC interruptions?
-- How does one bad file get quarantined without stopping a campaign?
+- How is an unreadable unit recorded so a later run can exclude it?
 
 ## Survey exists because Datatrail is not an analyzer inventory
 
-Datatrail can show that a dataset is registered. It does not decide what your analyzer
-expects.
+Datatrail can show that a dataset is registered. It does not know which rows
+your analyzer needs or what should count as one unit of analysis.
 
 Examples:
 
-- CHIME DTV needs 23 specific baseband `freq_id` files per event. Some events may be
-  missing some freq_ids. Survey should include present files and omit missing ones.
-- GBO processed acquisition may have registered datasets with policies but no visible files.
-  Survey should record them as empty/skipped, not manufacture event/freq_id probes.
-- A rare HDF5 bad header is not a survey problem. The file exists and may download; the
-  reader discovers the bad header during scan, and scan quarantines it.
+- A CHIME DTV analysis may request 23 specific baseband `freq_id` files per
+  event. The event survey verifies those expected names and writes rows for the
+  files it can verify through CADC metadata.
+- A GBO processed acquisition may be registered even when the queried dataset
+  exposes no files. Recon can preserve the name for investigation, but the
+  event survey must not manufacture CHIME-style event/freq_id units for a
+  non-event product. That layout needs its own source or reader policy.
+- An HDF5 header can fail only after a file has been staged. That is a scan-time
+  reader failure, not evidence that the archive registration was wrong. A probe
+  failure is recorded in the quarantine ledger when quarantine is enabled.
 
 ## Larger datasets versus file-bearing datasets
 
@@ -75,7 +86,8 @@ If:
 datatrail ps gbo.acquisition.processed 20230512T012608Z_gbo_corr -s
 ```
 
-prints an empty file table, then that name is not directly usable as a scan unit.
+prints an empty file table, that query has not produced a file that can be a
+scan unit.
 
 Try:
 
@@ -83,17 +95,18 @@ Try:
 PAGER=cat datatrail ls gbo.acquisition.processed 20230512T012608Z_gbo_corr
 ```
 
-If the child dataset table is empty too, then the registered dataset appears empty through
-Datatrail and survey should skip it. Recon's `--expand` runs exactly this
-child check across every matched dataset at once, and `files()` is the
-empty-versus-outage-aware form of the `ps -s` probe.
+If the child table is also empty, Datatrail has exposed neither files nor child
+datasets for that name. Recon's `--expand` performs this child query across the
+matched rows and keeps a childless container visible in the map. `files()` is
+the outage-aware form of the `ps -s` query: `(None, [], True)` means the call
+answered with no usable files, while `ok=False` means the call did not provide a
+usable answer. Neither case should be converted into invented scan units.
 
 ## Required user knowledge
 
-For a new analysis, the user maps these out. Neither example below ships in
-datatrawl -- they show how two real use cases (an F-statistic DTV detector; a GBO
-processed-acquisition energy scan) would each plug their own source/reader/analyzer
-into the engine:
+Before writing a new analysis, map out the following questions. Neither example
+analyzer in this table ships with `datatrawl`; they show where the archive,
+format, and science responsibilities separate.
 
 | Question | Example: a CHIME DTV detector | Example: a GBO processed-acquisition scan |
 |---|---|---|
@@ -106,10 +119,14 @@ into the engine:
 
 ## Design rules
 
-1. Do not hide scope choices in instrument geometry.
+1. Instrument YAML may provide default event-survey scopes, but an explicit
+   `--scope` must remain available. Do not treat those defaults as a complete
+   map of the telescope's archive namespace.
 2. Do not use CHIME baseband freq_id probing for non-baseband products.
-3. Keep Datatrail traversal (the source) separate from file-format parsing (the reader) and science (the analyzer).
+3. Keep Datatrail traversal (the source) separate from file-format parsing
+   (the reader) and science (the analyzer).
 4. Keep file-format knowledge in readers.
 5. Keep science logic in analyzers.
 6. Keep corrupt-file quarantine in scan, not survey.
-7. Require product-level resume for long analyzers.
+7. For a resumable analyzer, persist committed unit keys and reject an
+   incompatible existing product in `resume()`.
