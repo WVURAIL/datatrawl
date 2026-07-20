@@ -414,9 +414,12 @@ class CadcDatatrailSource(DataSource):
         p = o.get("inventory")
         if p:
             return p
-        base = o.get("root", ".")
-        tel = ctx.instrument.name
-        return f"{base}/data/{tel}/inventory.jsonl"
+        name = o.get("name") or ctx.instrument.name
+        base = o.get("root")
+        if base:
+            return f"{base}/data/{name}/inventory.jsonl"
+        from datatrawl.invpaths import resolve_inventory
+        return str(resolve_inventory(name))
 
     def enumerate(self, ctx: RunContext) -> Iterable[Unit]:
         path = self._inventory_path(ctx)

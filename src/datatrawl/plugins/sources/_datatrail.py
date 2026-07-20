@@ -116,8 +116,14 @@ def _run_json(args: "Sequence[str]") -> "tuple[Optional[dict], str]":
     payload = _extract_json(proc.stdout)
     if payload is None:
         tail = (proc.stderr or "").strip().splitlines()
+        last = tail[-1] if tail else ""
+        if "No such option" in last and "--json" in last:
+            raise SystemExit(
+                "datatrail-cli is too old for the --json contract this "
+                "adapter requires (>= 0.11). Upgrade with: "
+                "pip install 'datatrail-cli>=0.11'")
         return None, (f"exit {proc.returncode}, no JSON on stdout"
-                      + (f" ({tail[-1]})" if tail else ""))
+                      + (f" ({last})" if last else ""))
     return payload, ""
 
 

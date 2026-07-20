@@ -431,6 +431,11 @@ def _make_ctx(args):
 #     axes are still the whole model; they're just inferred from the inventory
 #     the survey already pinned down. Explicit flags always win.
 # --------------------------------------------------------------------------
+from pathlib import Path as pathlib_Path
+
+from datatrawl import invpaths
+
+
 def _meta_path_for(inventory_path: str) -> str:
     return os.path.splitext(inventory_path)[0] + ".meta.json"
 
@@ -516,8 +521,12 @@ def write_inventory_meta(inventory_path, instrument, source, freq_ids=None,
 
 
 def _sole_inventory(root: str):
-    """The single per-telescope inventory under data/, if there's exactly one."""
-    hits = glob.glob(os.path.join(root, "data", "*", "inventory.jsonl"))
+    """The single inventory across the canonical root and legacy data/ dirs,
+    if there's exactly one."""
+    hits = sorted(set(
+        glob.glob(str(invpaths.inventory_root() / "*" / "inventory.jsonl"))
+        + glob.glob(os.path.join(root, "data", "*", "inventory.jsonl"))
+        + glob.glob(str(pathlib_Path.home() / "data" / "*" / "inventory.jsonl"))))
     return hits[0] if len(hits) == 1 else None
 
 
@@ -527,13 +536,15 @@ def _resolve_from_meta(args) -> None:
     telescope's default dir, else the sole inventory under data/. Explicit flags
     are never overwritten; a missing or unreadable sidecar is a silent no-op."""
     inv = getattr(args, "inventory", None)
-    root = getattr(args, "root", os.getcwd())
+    root = getattr(args, "root", None)
     if inv is None and getattr(args, "name", None):
-        inv = os.path.join(root, "data", args.name, "inventory.jsonl")
+        inv = (os.path.join(root, "data", args.name, "inventory.jsonl")
+               if root else str(invpaths.resolve_inventory(args.name)))
     if inv is None and getattr(args, "telescope", None):
-        inv = os.path.join(root, "data", args.telescope, "inventory.jsonl")
+        inv = (os.path.join(root, "data", args.telescope, "inventory.jsonl")
+               if root else str(invpaths.resolve_inventory(args.telescope)))
     if inv is None:
-        inv = _sole_inventory(root)
+        inv = _sole_inventory(root or os.getcwd())
     if not inv:
         return
     meta_path = _meta_path_for(inv)
@@ -587,7 +598,8 @@ def cmd_survey(args) -> int:
         # the recon scope map lands at data/scopes.jsonl, a level above the
         # per-telescope inventory dirs: without --telescope it spans every
         # telescope, and even narrowed it is a discovery map, not an inventory.
-        out_dir = os.path.join(args.root, "data")
+        out_dir = (os.path.join(args.root, "data") if args.root
+                   else str(invpaths.inventory_root()))
         name = None
     elif args.out:
         out_dir = args.out
@@ -599,7 +611,8 @@ def cmd_survey(args) -> int:
         # re-survey resumes the same one). --name overrides the derived label.
         name = getattr(args, "name", None) or derive_inventory_name(
             instrument.name, getattr(args, "freq_ids", None))
-        out_dir = os.path.join(args.root, "data", name)
+        out_dir = (os.path.join(args.root, "data", name) if args.root
+                   else str(invpaths.inventory_dir_for_write(name)))
     print(f"[survey] {instrument.name if instrument else '(all scopes)'} "
           f"via {args.source} -> {out_dir}")
     if args.dry_run:
@@ -822,7 +835,7 @@ def _default_quarantine_path(args, instrument) -> str:
     """Source/reader-scoped quarantine ledger for this telescope."""
     name = (f"{_path_component(args.source)}--"
             f"{_path_component(args.reader)}.jsonl")
-    return os.path.join(args.root, "results", instrument.name, "quarantine", name)
+    return os.path.join(args.root or os.getcwd(), "results", instrument.name, "quarantine", name)
 
 
 def cmd_scan(args) -> int:
@@ -930,7 +943,7 @@ def cmd_scan(args) -> int:
 def _default_product_path(args, instrument, selection) -> str:
     # Namespaced by analyzer so two analyses never collide on the same
     # <freq_id>.npz (e.g. spectrum's products live under results/<tel>/spectrum/).
-    base = os.path.join(args.root, "results", instrument.name, args.analyzer)
+    base = os.path.join(args.root or os.getcwd(), "results", instrument.name, args.analyzer)
     if isinstance(selection, dict):
         # the structured form a per-event plan_runs returns, e.g.
         # {"events": ["349382977"], "freq_ids": "506-844"} -> ev349382977_506-844
@@ -1061,7 +1074,7 @@ def build_parser() -> argparse.ArgumentParser:
                                "every scope datatrail can see.")
     p_survey.add_argument("--source", default="cadc-datatrail",
                           help="source plugin to use (default: cadc-datatrail)")
-    p_survey.add_argument("--root", default=os.getcwd(),
+    p_survey.add_argument("--root", default=None,
                           help="working root; the inventory lands under "
                                "<root>/data/ (default: current directory)")
     p_survey.add_argument("--out", default=None,
@@ -1150,7 +1163,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_expl.add_argument(
         "--set", dest="set_opts", action="append", metavar="KEY=VALUE",
         help="source-specific parameter passed via ctx.options (repeatable)")
-    p_expl.add_argument("--root", default=os.getcwd(),
+    p_expl.add_argument("--root", default=None,
                         help="working root containing data/ "
                              "(default: current directory)")
     p_expl.set_defaults(func=cmd_explore)
@@ -1175,7 +1188,7 @@ def build_parser() -> argparse.ArgumentParser:
                              "'506-552' (spectrum needs explicit freq_ids), or "
                              "events with 'events:349382977[,...]' for an "
                              "event-oriented analyzer")
-    p_scan.add_argument("--root", default=os.getcwd(),
+    p_scan.add_argument("--root", default=None,
                         help="working root containing data/ and results/ "
                              "(default: current directory)")
     p_scan.add_argument("--out", default=None, help="product path (default results/<tel>/<analyzer>/<sel>.npz)")
