@@ -1,8 +1,4 @@
 <p align="center">
-  <img src="assets/logo-banner.svg" alt="datatrawl — storage-safe archive trawling for resumable telescope-data analysis" width="820">
-</p>
-
-<p align="center">
   <a href="https://github.com/WVURAIL/datatrawl/actions/workflows/tests.yml"><img src="https://github.com/WVURAIL/datatrawl/actions/workflows/tests.yml/badge.svg" alt="tests"></a>
   <a href="https://www.python.org/downloads/"><img src="https://img.shields.io/badge/python-3.9%2B-blue.svg" alt="python 3.9+"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-yellow.svg" alt="license: MIT"></a>
