@@ -4,6 +4,12 @@ An analyzer contains the science operation. It consumes the arrays produced by a
 and accumulates a small product that can be checkpointed and resumed. The public and
 internal plugin type is `analyzer`.
 
+The fastest start is the
+[`WVURAIL/datatrawl-analyzer-template`](https://github.com/WVURAIL/datatrawl-analyzer-template)
+repository: create a repository from the template, follow its rename checklist,
+and replace the example science. This guide documents the contract that the
+template already implements.
+
 ## Minimal analyzer
 
 ```python

@@ -350,6 +350,12 @@ The plugin can be loaded in three ways:
 This arrangement keeps project-specific analysis code outside the `datatrawl`
 repository.
 
+The included `spectrum` analyzer is the deliberate exception: it is the
+built-in example, and the only analyzer that will live in this repository.
+Instrument, source, and reader additions are welcome here as pull requests;
+analyzers are not merged into `datatrawl` and belong to the project that owns
+the science.
+
 ### Which piece do I need to write?
 
 | Your case | Write this |
