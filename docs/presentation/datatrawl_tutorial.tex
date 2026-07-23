@@ -460,76 +460,8 @@ $ datatrawl scan ...    --name <campaign>
 
 % 9
 \begin{frame}{One fixed engine connects four interchangeable pieces}
-  \begin{tikzpicture}[x=.92cm,y=.92cm,
-      piecename/.style={text=DTCyanText,font=\fontsize{10.5}{12.5}\selectfont\bfseries},
-      piecesub/.style={text=DTMuted,font=\fontsize{8}{9.5}\selectfont},
-      engchip/.style={chip,inner xsep=2mm,font=\fontsize{8.5}{10}\selectfont\bfseries},
-      drop/.style={-{Stealth[length=2.4mm,width=1.9mm]},DTCyan!70!DTCanvas,
-                   line width=0.9pt,dashed},
-      dropamber/.style={drop,DTAmber!80!DTCanvas}]
-
-    % ------------------------------------------------ four interchangeable pieces
-    \node[card,minimum width=2.5cm,minimum height=1.05cm,inner sep=2mm]      (instrument) at (3.2,4.9)  {};
-    \node[card,minimum width=2.5cm,minimum height=1.05cm,inner sep=2mm]      (source)     at (6.2,4.9)  {};
-    \node[card,minimum width=2.5cm,minimum height=1.05cm,inner sep=2mm]      (reader)     at (9.2,4.9)  {};
-    \node[cardamber,minimum width=2.5cm,minimum height=1.05cm,inner sep=2mm] (analyzer)   at (12.2,4.9) {};
-    \node[piecename] at (3.2,5.08)  {instrument};
-    \node[piecesub]  at (3.2,4.68)  {telescope geometry};
-    \node[piecename] at (6.2,5.08)  {source};
-    \node[piecesub]  at (6.2,4.68)  {where data lives};
-    \node[piecename] at (9.2,5.08)  {reader};
-    \node[piecesub]  at (9.2,4.68)  {file $\rightarrow$ arrays};
-    \node[piecename,text=DTAmber] at (12.2,5.08) {analyzer};
-    \node[piecesub]  at (12.2,4.68) {arrays $\rightarrow$ product};
-
-    % ------------------------------------------------------------ streaming engine
-    \node[panel,minimum width=9.7cm,minimum height=2.5cm] (engine) at (7.4,2.45) {};
-    \node[text=DTInk,font=\fontsize{12}{14}\selectfont\bfseries,anchor=west] at (2.9,3.35)
-      {streaming engine};
-    \node[sublabel,anchor=west] at (6.75,3.32)
-      {--- the fixed part; you don't touch this};
-
-    \draw[drop] (instrument.south) -- (3.2,3.79);
-    \draw[drop] (source.south)     -- (6.2,3.79);
-    \draw[drop] (reader.south)     -- (9.2,3.79);
-    \draw[dropamber] (analyzer.south) -- (12.2,3.79);
-
-    \node[engchip,anchor=west]                   (fetch)      at (2.85,2.35) {fetch};
-    \node[engchip,right=0.45 of fetch]           (read)       {read};
-    \node[engchip,chipamber,right=0.45 of read]  (analyze)    {analyze};
-    \node[engchip,right=0.45 of analyze]         (delete)     {delete};
-    \node[engchip,chipgreen,right=0.45 of delete] (checkpoint) {checkpoint};
-    \draw[flow] (fetch)--(read);
-    \draw[flow] (read)--(analyze);
-    \draw[flowamber] (analyze)--(delete);
-    \draw[flowgreen] (delete)--(checkpoint);
-    \draw[return,line width=0.9pt,rounded corners=2mm]
-      (checkpoint.south) -- ++(0,-0.42) -| (fetch.south);
-    \node[text=DTGreen!75!DTSoft,font=\fontsize{8}{9.5}\selectfont\itshape] at (7.4,1.38)
-      {repeat per unit --- bounded staging, streaming arrays};
-
-    % ---------------------------------------------------------------- archive in
-    \node[text=DTInk,font=\fontsize{10.5}{12.5}\selectfont\bfseries] at (0.95,3.9) {archive};
-    \fileicon{0.65}{3.1}{DTCyan}
-    \fileicon{0.95}{2.85}{DTCyan}
-    \fileicon{1.25}{2.6}{DTCyan}
-    \node[text=DTMuted,font=\fontsize{8}{9.5}\selectfont] at (0.95,1.95) {Datatrail\,$\cdot$\,CADC};
-    \node[text=DTMuted,font=\fontsize{8}{9.5}\selectfont] at (0.95,1.62) {thousands of files};
-    \draw[flow] (1.68,2.6)--(2.08,2.6);
-
-    % -------------------------------------------------------------- products out
-    \node[text=DTInk,font=\fontsize{8.5}{10}\selectfont\bfseries] at (13.95,4.05)
-      {analyzer-defined};
-    \node[sublabel] at (13.95,3.62) {resumable products};
-    \node[file,minimum width=2.2cm,minimum height=0.75cm,
-          font=\fontsize{8}{9.5}\selectfont] (pa) at (13.95,2.9) {\texttt{product-a.npz}};
-    \node[file,minimum width=2.2cm,minimum height=0.75cm,
-          font=\fontsize{8}{9.5}\selectfont] (pb) at (13.95,1.85) {\texttt{product-b.npz}};
-    \node[sublabel] at (13.95,1.0) {\dots\ fan-out is\\plugin-defined};
-    \draw[flowamber] (12.58,2.45)--(pa.west);
-    \draw[flowamber] (12.58,2.45)--(pb.west);
-  \end{tikzpicture}
-  \source{Layout follows repository asset \texttt{assets/architecture.svg}; amber denotes the analyzer supplied by the science project.}
+  \input{../../assets/architecture.tikz}
+  \source{This figure is the repository architecture asset (\texttt{assets/architecture.tikz}); amber denotes the analyzer supplied by the science project.}
   \note{
     This is the complete architecture. An instrument provides telescope geometry
     such as the band, channelization, feed count, Nyquist zone, and default FFT

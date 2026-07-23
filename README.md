@@ -544,9 +544,10 @@ is optional and reduces the SVG file size.
 
 The tutorial slide deck lives in `docs/presentation/` and builds with
 `make slides` (LuaLaTeX; see `docs/presentation/README.md` for the package
-list). The `assets/fig-*.tikz` figure bodies are shared: the deck inputs them
-directly, and `make diagram` renders the same sources into the README's
-committed `assets/fig-*.svg` files, so a figure edited once updates both.
+list). The `assets/*.tikz` figure bodies (the architecture diagram included) are
+shared: the deck inputs them directly, and `make diagram` renders the same
+sources into the README's committed SVG files, so a figure edited once
+updates both.
 
 The CANFAR images used for this project did not provide TeX or root access. We
 therefore build the documents and diagrams in a local environment and commit

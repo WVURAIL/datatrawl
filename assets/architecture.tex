@@ -1,141 +1,15 @@
-% datatrawl architecture diagram -- TikZ source of truth.
-%
+% datatrawl architecture diagram -- standalone wrapper for the shared body
+% assets/architecture.tikz, which the tutorial deck (docs/presentation/)
+% also \input s. Palette and styles: assets/datatrawl-figures.sty.
 % Regenerate the README asset with:  make diagram
-% (latexmk builds the PDF, pdftocairo converts it to assets/architecture.svg)
-%
-% Canvas and palette match the original hand-drawn SVG: 1120x520 viewBox,
-% navy canvas #0a2235, cyan accent family (#4fd0e0 / #7fe3e8 / #9fe8ec),
-% amber (#f6a623) reserved for the analyzer -- the piece you write.
-\documentclass[tikz]{standalone}
+\documentclass[tikz,border=8pt]{standalone}
 \usepackage{lmodern}
 \usepackage[T1]{fontenc}
+\usepackage{amssymb}
 \renewcommand{\familydefault}{\sfdefault}
-\usetikzlibrary{arrows.meta,calc}
-
-\definecolor{canvas}{HTML}{0a2235}
-\definecolor{panel}{HTML}{0e2942}
-\definecolor{panelup}{HTML}{11324d}
-\definecolor{chipbg}{HTML}{13344f}
-\definecolor{cardbg}{HTML}{102a40}
-\definecolor{cyanline}{HTML}{4fd0e0}
-\definecolor{cyantext}{HTML}{7fe3e8}
-\definecolor{cyanpale}{HTML}{9fe8ec}
-\definecolor{amber}{HTML}{f6a623}
-\definecolor{ambersoft}{HTML}{fbbf24}
-\definecolor{ink}{HTML}{e6f3fb}
-\definecolor{soft}{HTML}{cfe7f2}
-\definecolor{muted}{HTML}{8aa6bf}
-\definecolor{dim}{HTML}{9fc2d6}
-
+\usetikzlibrary{arrows.meta,positioning,calc,fit,shapes.geometric,decorations.pathreplacing}
+\pagecolor{white}
+\input{datatrawl-figures.sty}
 \begin{document}
-\begin{tikzpicture}[
-  x=1pt, y=-1pt,                      % transcribe the SVG coordinate frame
-  every node/.style={inner sep=0pt},
-  plugin/.style={draw=cyanline, line width=1.0pt, fill=panelup,
-                 rounded corners=8pt, minimum width=150pt, minimum height=54pt},
-  pluginamber/.style={plugin, draw=amber},
-  chip/.style={draw=cyanline, line width=0.9pt, fill=chipbg,
-               rounded corners=9pt, minimum width=86pt, minimum height=26pt},
-  card/.style={draw=cyanline, line width=0.9pt, fill=cardbg,
-               rounded corners=5pt, minimum width=104pt, minimum height=34pt},
-  flow/.style={-{Stealth[length=7pt,width=6pt]}, cyanline, line width=1.2pt},
-  drop/.style={-{Stealth[length=6pt,width=5pt]}, cyanline!70!canvas,
-               line width=0.9pt, dashed},
-]
-
-% ---------------------------------------------------------------- canvas
-\fill[canvas, rounded corners=14pt] (0,0) rectangle (1120,520);
-
-% ----------------------------------------------------------------- title
-\node[anchor=base west, text=ink, font=\Large\bfseries] at (40,52)
-  {How a run works};
-\node[anchor=base west, text=muted, font=\small] at (40,80)
-  {\textcolor{cyantext}{four pieces} $\rightarrow$
-   \textcolor{ink}{one fixed engine} $\rightarrow$
-   \textcolor{ambersoft}{analyzer-defined products}};
-
-% ---------------------------------------------------- four plugin boxes
-% centers x = 318, 486, 654, 822; box top y = 104
-\node[plugin]      (instrument) at (318,131) {};
-\node[plugin]      (source)     at (486,131) {};
-\node[plugin]      (reader)     at (654,131) {};
-\node[pluginamber] (analyzer)   at (822,131) {};
-
-\node[anchor=base, text=cyantext, font=\normalsize\bfseries] at (318,128) {instrument};
-\node[anchor=base, text=muted,    font=\footnotesize]        at (318,145) {telescope geometry};
-\node[anchor=base, text=cyantext, font=\normalsize\bfseries] at (486,128) {source};
-\node[anchor=base, text=muted,    font=\footnotesize]        at (486,145) {where data lives};
-\node[anchor=base, text=cyantext, font=\normalsize\bfseries] at (654,128) {reader};
-\node[anchor=base, text=muted,    font=\footnotesize]        at (654,145) {file $\rightarrow$ arrays};
-\node[anchor=base, text=ambersoft,font=\normalsize\bfseries] at (822,128) {analyzer};
-\node[anchor=base, text=muted,    font=\footnotesize]        at (822,145) {arrays $\rightarrow$ product};
-
-% ------------------------------------------------------- streaming engine
-\draw[draw=cyanline, line width=1.2pt, fill=panel, rounded corners=12pt]
-  (248,196) rectangle (880,372);
-
-\node[anchor=base west, text=ink,   font=\large\bfseries] at (270,224) {streaming engine};
-\node[anchor=base west, text=muted, font=\footnotesize]   at (270,243)
-  {the fixed part --- you don't touch this};
-
-% plugin drops into the engine top edge
-\draw[drop] (instrument.south) -- (318,196);
-\draw[drop] (source.south)     -- (486,196);
-\draw[drop] (reader.south)     -- (654,196);
-\draw[drop, cyanline!70!canvas, draw=amber!80!canvas] (analyzer.south) -- (822,196);
-
-% stage chips: centers x = 316, 430, 544, 658, 786 at y = 279
-\node[chip] (fetch)      at (316,279) {};
-\node[chip] (read)       at (430,279) {};
-\node[chip] (analyze)    at (544,279) {};
-\node[chip] (delete)     at (658,279) {};
-\node[chip, minimum width=100pt] (checkpoint) at (786,279) {};
-
-\node[anchor=base, text=soft, font=\small\bfseries] at (316,283) {fetch};
-\node[anchor=base, text=soft, font=\small\bfseries] at (430,283) {read};
-\node[anchor=base, text=soft, font=\small\bfseries] at (544,283) {analyze};
-\node[anchor=base, text=soft, font=\small\bfseries] at (658,283) {delete};
-\node[anchor=base, text=soft, font=\small\bfseries] at (786,283) {checkpoint};
-
-\draw[flow] (fetch.east)   -- (read.west);
-\draw[flow] (read.east)    -- (analyze.west);
-\draw[flow] (analyze.east) -- (delete.west);
-\draw[flow] (delete.east)  -- (checkpoint.west);
-
-% repeat loop under the chips
-\draw[flow, cyanline!80!canvas, line width=1.0pt, rounded corners=8pt]
-  (checkpoint.south) -- ++(0,22) -- ($(fetch.south)+(0,22)$) -- (fetch.south);
-\node[anchor=base, text=dim, font=\footnotesize\itshape] at (551,352)
-  {repeat per unit --- bounded staging, streaming arrays};
-
-% ---------------------------------------------------------------- archive
-\node[anchor=base west, text=ink, font=\normalsize\bfseries] at (60,210) {archive};
-\node[card, minimum width=96pt, minimum height=68pt] (afile) at (102,302) {};
-\draw[cyanline, line width=0.9pt, fill=panelup]
-  (134,268) -- (150,268) -- (150,284) -- cycle;   % folded corner
-\node[anchor=base west, text=soft,     font=\footnotesize\bfseries] at (74,298) {baseband};
-\node[anchor=base west, text=cyanpale, font=\footnotesize]          at (74,310) {ch 0614};
-\node[anchor=base west, text=muted,    font=\footnotesize]          at (74,322) {.h5};
-\node[anchor=base west, text=dim,   font=\footnotesize] at (54,346) {Datatrail\,$\cdot$\,CADC};
-\node[anchor=base west, text=muted, font=\footnotesize] at (54,363) {thousands of files};
-
-\draw[flow] (afile.east) -- (248,302);
-
-% --------------------------------------------------------------- products
-\node[anchor=base, text=ink,   font=\normalsize\bfseries] at (990,210)
-  {analyzer-defined};
-\node[anchor=base, text=muted, font=\footnotesize] at (990,227)
-  {resumable products};
-
-\node[card] (p1) at (990,272) {};
-\node[card] (p2) at (990,320) {};
-\node[card] (p3) at (990,368) {};
-\node[anchor=base, text=cyanpale, font=\small] at (990,269) {product-a.npz};
-\node[anchor=base, text=cyanpale, font=\small] at (990,317) {product-b.npz};
-\node[anchor=base, text=cyanpale, font=\small] at (990,365) {\dots};
-\node[anchor=base, text=muted, font=\footnotesize] at (990,413) {fan-out is plugin-defined};
-
-\draw[flow, draw=amber] (880,302) -- (p2.west);
-
-\end{tikzpicture}
+\input{architecture.tikz}
 \end{document}
