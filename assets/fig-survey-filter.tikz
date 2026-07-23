@@ -1,0 +1,32 @@
+\begin{tikzpicture}[x=.92cm,y=.92cm]
+    % the archive as it is: duplicates, events with partial or missing channels
+    \node[panel,minimum width=4.4cm,minimum height=3.4cm] (mess) at (2.5,3.35) {};
+    \node[text=DTCyanText,font=\fontsize{12}{14}\selectfont\bfseries] at (2.5,4.7) {the archive};
+    \fileicon{1.67}{3.84}{DTAmber}\fileicon{1.55}{3.72}{DTAmber}% duplicate pair, wanted channel
+    \fileicon{2.55}{3.72}{DTGray}
+    \fileicon{3.55}{3.72}{DTGray}
+    \fileicon{1.67}{2.74}{DTGray}\fileicon{1.55}{2.62}{DTGray}% duplicate pair, other channel
+    \fileicon{2.55}{2.62}{DTAmber}
+    \fileicon{3.55}{2.62}{DTGray}
+    \node[sublabel] at (2.5,1.82) {duplicates $\cdot$ missing channels};
+
+    \draw[flow] (5.0,3.35)--(5.42,3.35);
+
+    % survey funnel with PilotProxy's concrete criteria
+    \draw[fill=DTPanelUp,draw=DTAmber,line width=1.1pt,line join=round]
+      (5.6,5.05) -- (9.05,4.03) -- (9.05,2.67) -- (5.6,1.65) -- cycle;
+    \node[text=DTAmber,font=\fontsize{14}{17}\selectfont\bfseries] at (6.9,4.0) {survey};
+    \node[text=DTSoft,font=\fontsize{9}{11}\selectfont,align=center] at (7.3,3.0)
+      {chime $\cdot$ baseband\\23 pilot \texttt{freq\_id}s\\all events};
+    \node[sublabel] at (7.3,1.15) {metadata only --- no bulk download};
+
+    \draw[flowgreen] (9.2,3.35)--(9.6,3.35);
+
+    % the verified work list
+    \node[file,draw=DTGreen,minimum width=4.5cm,minimum height=3.0cm] (json) at (12.2,3.35) {};
+    \node[text=DTGreen,font=\fontsize{12}{14}\selectfont\bfseries] at (12.2,4.5) {inventory.jsonl};
+    \node[text=DTSoft,font=\fontsize{9}{11}\selectfont,align=left] at (12.2,2.95)
+      {\checkmark\ only the 23 pilot channels\\[1mm]
+       \checkmark\ only events that carry them\\[1mm]
+       \checkmark\ every unit exactly once};
+  \end{tikzpicture}

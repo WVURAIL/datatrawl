@@ -1,0 +1,33 @@
+\begin{tikzpicture}[x=.92cm,y=.92cm]
+    \node[label,anchor=west] at (.4,4.7) {first run};
+    \draw[DTGray,line width=1.0pt] (.5,3.96)--(12.95,3.96);
+    \foreach \x in {0,...,7}{
+      \fill[DTGreen!70!DTPanel] (1.1+1.02*\x,3.65) rectangle ++(.72,.62);
+      \node[text=DTInk,font=\fontsize{7.5}{9}\selectfont] at (1.46+1.02*\x,3.96) {\number\numexpr\x+1\relax};
+    }
+    \foreach \x in {8,...,10}{
+      \fill[DTAmber!65!DTPanel] (1.1+1.02*\x,3.65) rectangle ++(.72,.62);
+      \node[text=DTInk,font=\fontsize{7.5}{9}\selectfont] at (1.46+1.02*\x,3.96) {\number\numexpr\x+1\relax};
+    }
+    \draw[DTGreen,line width=1.8pt] (9.11,3.35)--(9.11,4.55);
+    \node[text=DTGreen,font=\fontsize{8.5}{10}\selectfont\bfseries] at (9.11,4.75) {saved product};
+    \draw[DTRed,line width=2pt,line cap=round] (12.2,3.4)--(12.7,4.5) (12.7,3.4)--(12.2,4.5);
+    \node[chipred,anchor=west,font=\fontsize{10}{12}\selectfont] at (12.95,3.95) {interruption};
+
+    \node[label,anchor=west] at (.4,2.15) {restart};
+    \draw[DTGray,line width=1.0pt] (.5,1.46)--(12.2,1.46);
+    \foreach \x in {0,...,7}{
+      \draw[draw=DTGreen,line width=.9pt,fill=DTGreen!20!DTPanel]
+        (1.1+1.02*\x,1.15) rectangle ++(.72,.62);
+      \checkmarkicon{1.46+1.02*\x,1.45}{DTGreen}
+    }
+    \foreach \x in {8,...,10}{
+      \draw[draw=DTCyan,line width=.9pt,fill=DTPanelUp]
+        (1.1+1.02*\x,1.15) rectangle ++(.72,.62);
+      \node[text=DTInk,font=\fontsize{7.5}{9}\selectfont] at (1.46+1.02*\x,1.46) {\number\numexpr\x+1\relax};
+    }
+    \draw[flowgreen] (12.3,1.46)--(12.85,1.46);
+    \node[chipgreen,anchor=west,font=\fontsize{10}{12}\selectfont] at (12.95,1.46) {continue};
+    \node[text=DTMuted,font=\fontsize{9}{11}\selectfont] at (5.0,.65) {committed keys are skipped};
+    \node[text=DTAmber,font=\fontsize{9}{11}\selectfont] at (10.6,.65) {post-checkpoint work may repeat};
+  \end{tikzpicture}

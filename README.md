@@ -13,6 +13,10 @@ default, one staged file exists at a time. The engine deletes that file after it
 has been streamed. Raising `--max-staged-files` enables prefetching while keeping
 the number of staged files bounded.
 
+<p align="center">
+  <img src="assets/fig-scratch-bound.svg" alt="The scratch bound: by default one occupied staging slot; with --max-staged-files N, never more than N staged files. Capacity is about N times the largest selected file." width="780">
+</p>
+
 By *resumable*, we mean that the analyzer records the unit keys committed to its
 product. The engine asks it to save every `--checkpoint-every` successfully
 consumed files, with a default interval of 50 files, and again at the end of a
@@ -47,6 +51,10 @@ Datatrail scope(s)
                 -> delete staged file
                 -> checkpoint product
 ```
+
+<p align="center">
+  <img src="assets/fig-scan-conveyor.svg" alt="Scan is a pull-process-delete conveyor: fetch, read, analyze, delete inside the scratch lifetime of one unit; the checkpoint is the small durable result; repeat with the next unit." width="860">
+</p>
 
 **Contents:** [The four pieces](#the-four-pieces) ·
 [Install](#install) ·
@@ -188,6 +196,10 @@ datatrawl scan \
   --max-frames-per-file 5
 ```
 
+<p align="center">
+  <img src="assets/fig-survey-filter.svg" alt="Survey is a filter: the archive with duplicates and missing channels, filtered by chime/baseband criteria into inventory.jsonl -- only the selected channels, only events that carry them, every unit exactly once, metadata only." width="800">
+</p>
+
 The scan writes an NPZ product. The following code plots the PSD.
 
 ```bash
@@ -223,6 +235,10 @@ The example uses `--max-frames-per-file 5`, so the product contains only the
 first five analysis frames from each file. For an uncapped scan, remove this
 option and write to a new `--out`, or remove the bounded product first. The
 spectrum analyzer rejects a resume that would combine capped and uncapped runs.
+
+<p align="center">
+  <img src="assets/fig-checkpoint-resume.svg" alt="Checkpoints make progress durable: a first run saves the product after unit 8 and is interrupted at unit 11; the restart skips the committed keys and continues, so only post-checkpoint work may repeat." width="820">
+</p>
 
 In a headless CANFAR session, `plt.show()` may not display a window. The
 `plt.savefig(...)` call still writes the figure.
@@ -380,6 +396,10 @@ Two examples show how we apply this division.
   **analyzer**. If its archive layout and file format differ from the included
   CHIME baseband path, it also requires a new **source** and **reader**.
 
+<p align="center">
+  <img src="assets/fig-plugin-ecosystem.svg" alt="Most pieces already exist: instruments, sources, and readers are stocked and change by pull request; the analyzer is always project-specific and lives in your repository." width="860">
+</p>
+
 ### Quick path: using datatrawl from your own project
 
 Most project-specific baseband analyses require only an analyzer. The
@@ -521,6 +541,12 @@ The shared trawl-net mark is defined once in `assets/trawlmark.tikz`. After a
 source edit, run `make diagram` to regenerate the committed SVG files. This
 target requires `pdftocairo` from `poppler-utils`. Installing `scour` with pip
 is optional and reduces the SVG file size.
+
+The tutorial slide deck lives in `docs/presentation/` and builds with
+`make slides` (LuaLaTeX; see `docs/presentation/README.md` for the package
+list). The `assets/fig-*.tikz` figure bodies are shared: the deck inputs them
+directly, and `make diagram` renders the same sources into the README's
+committed `assets/fig-*.svg` files, so a figure edited once updates both.
 
 The CANFAR images used for this project did not provide TeX or root access. We
 therefore build the documents and diagrams in a local environment and commit

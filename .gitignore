@@ -13,6 +13,7 @@ venv/
 *.npz
 *.pdf
 docs/out/
+docs/presentation/out/
 assets/out/
 inventory.jsonl
 /scratch/

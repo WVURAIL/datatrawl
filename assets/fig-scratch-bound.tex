@@ -1,0 +1,14 @@
+% Standalone wrapper for the shared figure assets/fig-scratch-bound.tikz,
+% which the tutorial deck (docs/presentation/) also \input s.
+% Regenerate the committed SVG with:  make diagram
+\documentclass[tikz,border=8pt]{standalone}
+\usepackage{lmodern}
+\usepackage[T1]{fontenc}
+\usepackage{amssymb}
+\renewcommand{\familydefault}{\sfdefault}
+\usetikzlibrary{arrows.meta,positioning,calc,fit,shapes.geometric,decorations.pathreplacing}
+\pagecolor{white}
+\input{datatrawl-figures.sty}
+\begin{document}
+\input{fig-scratch-bound.tikz}
+\end{document}

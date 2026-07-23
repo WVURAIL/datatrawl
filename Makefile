@@ -6,6 +6,7 @@
 #   make smoke       quick CLI checks (list / doctor)
 #   make docs        build the LaTeX data sheet + user guide into docs/out/
 #   make diagram     regenerate the assets/*.svg graphics from TikZ sources
+#   make slides      build the tutorial slide deck into docs/presentation/out/
 #   make clean       remove build artifacts, caches, and run outputs
 #
 # Typical first time:   make venv && . .venv/bin/activate && make install && make test
@@ -13,7 +14,7 @@
 PY ?= python3
 VENV ?= .venv
 
-.PHONY: venv install test smoke clean docs diagram
+.PHONY: venv install test smoke clean docs diagram slides
 
 venv:
 	$(PY) -m venv $(VENV)
@@ -60,6 +61,20 @@ diagram:
 	    echo "regenerated assets/$$base.svg"; \
 	done
 
+# The tutorial deck (28 slides + backups, presenter notes on a second screen).
+# Needs LuaLaTeX: the Amurmaple theme's delaunay title decoration runs MetaPost
+# through luamesh. See docs/presentation/README.md for the package list.
+slides:
+	@command -v lualatex >/dev/null || { \
+	    echo "lualatex not found -- see docs/presentation/README.md"; exit 1; }
+	cd docs/presentation && \
+	    latexmk -lualatex -interaction=nonstopmode -halt-on-error \
+	        -outdir=out datatrawl_tutorial.tex && \
+	    latexmk -lualatex -interaction=nonstopmode -halt-on-error \
+	        -outdir=out -jobname=datatrawl_tutorial_slides \
+	        -usepretex='\def\slidesonly{1}' datatrawl_tutorial.tex
+	@echo "PDFs in docs/presentation/out/ (with notes + slides-only)"
+
 clean:
-	rm -rf build dist *.egg-info src/*.egg-info .pytest_cache results data logs docs/out assets/out
+	rm -rf build dist *.egg-info src/*.egg-info .pytest_cache results data logs docs/out assets/out docs/presentation/out
 	find . -type d -name __pycache__ -prune -exec rm -rf {} + 2>/dev/null || true

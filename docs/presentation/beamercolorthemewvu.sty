@@ -1,0 +1,58 @@
+% wvu brand palette — web-optimized hex values (oct 10, 2025)
+% source: wvu strategic communications & marketing, visual identity → color
+% https://scm.wvu.edu/brand/visual-identity/
+
+% Provides the 'wvu' color theme for beamer
+\ProvidesPackage{beamercolorthemewvu}[2025/10/14 v1.0 WVU Custom Color Theme]
+
+% This command ensures the code is only processed when beamer is loaded
+\mode<presentation>
+
+\RequirePackage{xcolor}
+
+% --- primary palette ---
+\definecolor{wvu-blue}{HTML}{002855}                   % rgb(0,40,85)
+\definecolor{wvu-gold}{HTML}{eeaa00}                   % rgb(238,170,0)
+
+% --- setting the primary colors ---
+\colorlet{Amurmaple@structure}{wvu-blue}
+\colorlet{Amurmaple@rule}{wvu-gold}
+
+
+
+%
+% There are many secondary colors defined by WVU's style guide, broken into
+% accents and neutrals.
+%
+
+% --- accent palette ---
+\definecolor{wvu-accent--starcityblue}{HTML}{9ddae6}   % rgb(157,218,230)
+\definecolor{wvu-accent--safetyblue}{HTML}{0062a3}     % rgb(0,98,163)
+\definecolor{wvu-accent--canary}{HTML}{f7dd63}         % rgb(247,221,99)
+\definecolor{wvu-accent--sunset}{HTML}{f58672}         % rgb(245,134,114)
+\definecolor{wvu-accent--woodburn}{HTML}{8d4638}       % rgb(141,70,56)
+\definecolor{wvu-accent--hemlock}{HTML}{6a724f}        % rgb(106,114,79)
+\definecolor{wvu-accent--wildflour}{HTML}{f2e6c2}      % rgb(242,230,194)
+\definecolor{wvu-accent--buckskin}{HTML}{b3a169}       % rgb(179,161,105)
+\definecolor{wvu-accent--oldgold}{HTML}{7f6310}        % rgb(127,99,16)
+
+% --- neutral palette ---
+\definecolor{wvu-neutral--rattlergray}{HTML}{554741}   % rgb(85,71,65)
+\definecolor{wvu-neutral--notquitewhite}{HTML}{f7f7f7} % rgb(247,247,247)
+\definecolor{wvu-neutral--coopersgray}{HTML}{beb7b3}   % rgb(190,183,179)
+\definecolor{wvu-neutral--senecagray}{HTML}{988e8b}    % rgb(152,142,139)
+\definecolor{wvu-neutral--coal}{HTML}{1c2b39}          % rgb(28,43,57)
+
+%
+% There are three that we need to pick: one for alert one for info, one 
+% for example.  As far as I can tell, just pick which ones you personally
+% like, as they aren't standardized.
+%
+
+% --- setting the secondary colors ---
+\colorlet{Amurmaple@alert}{wvu-accent--woodburn}
+\colorlet{Amurmaple@info}{wvu-accent--hemlock}
+\colorlet{Amurmaple@example}{wvu-accent--oldgold}
+
+
+\mode<all>

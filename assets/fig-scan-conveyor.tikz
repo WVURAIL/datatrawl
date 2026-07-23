@@ -1,0 +1,30 @@
+\begin{tikzpicture}[x=.92cm,y=.92cm]
+    % conveyor: archive -> fetch -> staged copy -> read -> analyze -> delete -> checkpoint
+    \node[group,minimum width=9.35cm,minimum height=2.5cm] (scratch) at (7.45,2.85) {};
+    \node[label] at (7.45,4.45) {scratch-lifetime of one unit};
+
+    \node[card,minimum width=1.7cm] (archive) at (1.15,3.1) {archive};
+    \node[chip,minimum width=1.5cm] (fetch) at (3.35,3.1) {\bfseries fetch};
+    \fileicon[1.3]{5.35}{3.1}{DTCyan}
+    \node[label] at (5.35,2.1) {staged copy};
+    \node[chip,minimum width=1.5cm] (read) at (7.05,3.1) {\bfseries read};
+    \node[chipamber,minimum width=1.8cm] (analyze) at (9.3,3.1) {\bfseries analyze};
+    \node[chip,minimum width=1.5cm] (delete) at (11.55,3.1) {\bfseries delete};
+    \node[chipgreen,minimum width=1.9cm] (checkpoint) at (13.9,3.1) {checkpoint};
+
+    \draw[flow] (2.2,3.1)--(2.62,3.1);
+    \draw[flow] (4.1,3.1)--(4.8,3.1);
+    \draw[flow] (5.9,3.1)--(6.32,3.1);
+    \draw[flowamber] (7.8,3.1)--(8.32,3.1);
+    \draw[flowmuted] (10.28,3.1)--(10.8,3.1);
+    \draw[flowgreen] (12.3,3.1)--(12.85,3.1);
+    \draw[return,rounded corners=3mm]
+      (checkpoint.south) -- (13.9,1.15) -- (3.35,1.15) -- (3.35,2.68);
+    \node[text=DTGreen,font=\fontsize{8.5}{10}\selectfont\bfseries] at (8.6,0.85)
+      {repeat with the next unit};
+
+    \node[text=DTCyanText,font=\fontsize{8.5}{10}\selectfont,align=center] at (1.15,2.2)
+      {archive copy\\remains};
+    \node[text=DTGreen,font=\fontsize{8.5}{10}\selectfont\bfseries] at (13.6,3.85)
+      {small durable result};
+  \end{tikzpicture}
