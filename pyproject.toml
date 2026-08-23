@@ -1,0 +1,106 @@
+[build-system]
+requires = ["setuptools>=77", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "datatrawl"
+version = "1.1.0.dev0"
+description = "Storage-safe archive trawling for resumable telescope-data analysis."
+readme = "README.md"
+requires-python = ">=3.9"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [
+    { name = "Dylan Gormley" },
+    { name = "WVU Radio Astronomy Instrumentation Lab (RAIL)" },
+]
+keywords = ["radio-astronomy", "CANFAR", "CADC", "CHIME"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Intended Audience :: Science/Research",
+    "Topic :: Scientific/Engineering :: Astronomy",
+]
+
+# Core runtime deps. The streaming engine and spectrum analyzer need numpy/h5py;
+# pyyaml loads the instrument geometry files. Archive access
+# (cadcdata/cadcutils/datatrail) is an OPTIONAL extra -- the local source and the
+# whole synthetic test path work without it.
+dependencies = [
+    "numpy>=1.21",
+    "h5py>=3.0",
+    "pyyaml>=5.4",
+]
+
+[project.optional-dependencies]
+cadc = [
+    "cadcdata",
+    "cadcutils",
+]
+gpu = [
+    # CuPy must match the CUDA module of your CANFAR session image, so it is not
+    # pinned here. datatrawl uses whatever cupy the image already ships; if it has
+    # none, run `datatrawl setup-cupy --install` to detect the image's CUDA version
+    # and install the matching cupy-cudaXXx wheel into the active environment.
+]
+dev = [
+    "pytest>=7",
+    "pytest-cov>=5",
+    "ruff>=0.9",
+    "build>=1.2",
+    "twine>=6.0",
+]
+survey = [
+    # `datatrawl survey` walks the Datatrail archive to build inventory.jsonl.
+    # 0.11.0 is the first release with the machine-readable mode the adapter
+    # drives (`datatrail ls/ps --json`, CHIMEFRB/datatrail-cli#160).
+    "cadcdata",
+    "cadcutils",
+    "datatrail-cli>=0.11.0",
+]
+outriggers = [
+    # The outrigger N-squared reader decodes files written with hdf5plugin's
+    # HDF5 compression filters; the gains reader needs only core h5py.
+    "hdf5plugin",
+]
+examples = [
+    # Plotting a spectrum product (the snippet in the README) needs matplotlib;
+    # the pipeline itself never imports it.
+    "matplotlib>=3.5",
+]
+
+[project.scripts]
+datatrawl = "datatrawl.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/WVURAIL/datatrawl"
+Source = "https://github.com/WVURAIL/datatrawl"
+Issues = "https://github.com/WVURAIL/datatrawl/issues"
+
+[tool.setuptools]
+package-dir = { "" = "src" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+# ship the instrument YAMLs inside the wheel
+datatrawl = ["instruments/*.yaml"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+
+[tool.ruff]
+target-version = "py39"
+
+[tool.ruff.lint]
+# Start with correctness-oriented checks that the existing tree can enforce
+# without a repository-wide formatting rewrite. More rule families can be
+# enabled incrementally once their changes are reviewed on their own merits.
+select = ["E9", "F"]

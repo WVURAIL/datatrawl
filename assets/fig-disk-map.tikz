@@ -1,0 +1,41 @@
+\begin{tikzpicture}[x=.92cm,y=.92cm]
+    % writers (commands)
+    \node[cardamber,minimum width=3.2cm,minimum height=1.2cm] (survey) at (2.1,4.75)
+      {\bfseries datatrawl survey};
+    \node[cardamber,minimum width=3.2cm,minimum height=1.2cm] (scan) at (2.1,1.85)
+      {\bfseries datatrawl scan};
+
+    % inventory home (durable)
+    \node[cardgreen,minimum width=6.3cm,minimum height=1.95cm,text width=5.9cm] (inv) at (8.85,4.75)
+      {\bfseries\texttt{\string~/datatrawl-inventories/<name>/}\\[1.2mm]
+       {\fontsize{9.5}{11.5}\selectfont\texttt{inventory.jsonl} $\cdot$ \texttt{inventory.meta.json}}};
+    \node[sublabel] at (9.6,3.46)
+      {\texttt{DATATRAWL\_INVENTORY\_ROOT} overrides the root};
+    \node[sublabel] at (9.6,3.14)
+      {\texttt{--root <r>} uses \texttt{<r>/data/<name>/}};
+
+    % staging (disposable)
+    \node[card,draw=DTGray,dashed,minimum width=4.7cm,minimum height=1.95cm,text width=4.3cm] (tmp) at (7.55,1.85)
+      {\bfseries staging directory\\[1.2mm]
+       {\fontsize{9.5}{11.5}\selectfont\texttt{DATATRAWL\_TMPDIR} $\to$ \texttt{/scratch} $\to$ OS tmp}};
+    \node[sublabel] at (7.55,0.6)
+      {unique per scan $\cdot$ each staged copy deleted after use};
+
+    % products (durable)
+    \node[cardgreen,minimum width=4.9cm,minimum height=1.95cm,text width=4.5cm] (res) at (14.1,1.85)
+      {\bfseries\texttt{results/<tel>/<analyzer>/}\\[1.2mm]
+       {\fontsize{9.5}{11.5}\selectfont\texttt{<selection>.npz} $\cdot$ quarantine ledger}};
+
+    % flows
+    \draw[flow] (survey)--(inv) node[midway,above,label]{writes};
+    \draw[flowmuted] (inv.west) -- ++(-1.0,0) |- ([yshift=5mm]scan.east)
+      node[pos=0.28,left,label,align=right]{read by\\\texttt{--name}};
+    \draw[flow] ([yshift=-2mm]scan.east)--([yshift=-2mm]tmp.west)
+      node[pos=0.38,below,label]{stages\\units};
+    \draw[flowgreen] (tmp)--(res)
+      node[pos=0.5,below,text=DTMuted,font=\fontsize{8}{9.5}\selectfont]{checkpoints};
+
+    % legend
+    \node[chipgreen,anchor=west,font=\fontsize{9}{11}\selectfont] at (13.55,4.95) {survives runs};
+    \node[chip,draw=DTGray,dashed,text=DTMuted,anchor=west,font=\fontsize{9}{11}\selectfont] at (13.55,4.1) {disposable};
+  \end{tikzpicture}

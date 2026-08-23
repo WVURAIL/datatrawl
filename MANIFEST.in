@@ -1,0 +1,10 @@
+include CITATION.cff
+include Makefile
+recursive-include tests *.py
+recursive-include examples *.py
+recursive-include docs *.md *.tex *.sty *.png
+recursive-include assets *.tex *.tikz *.sty *.svg
+prune docs/out
+prune assets/out
+prune docs/presentation/out
+global-exclude *.pdf

@@ -1,0 +1,9 @@
+# Green Bank Outrigger (GBO). CHIME-compatible channelization, so it inherits all
+# of CHIME's geometry via `extends` and overrides only the feed count and scope.
+name: gbo
+extends: chime
+
+n_feeds: 256             # outriggers (CHIME is 2048); same across gbo/hco/kko
+
+scopes:
+  - gbo.event.baseband.raw

@@ -1,0 +1,30 @@
+# Python cache & virtualenvs
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+build/
+dist/
+
+# Downloaded archive files & temporary storage dumps
+*.fits
+*.fits.gz
+*.h5
+*.hdf5
+*.tar
+*.tar.gz
+.trawl_cache/
+
+# Generated run and documentation output
+data/
+logs/
+results/
+docs/out/
+assets/out/
+docs/presentation/out/

@@ -1,0 +1,24 @@
+\begin{tikzpicture}[x=.92cm,y=.92cm]
+    \node[text=DTInk,font=\fontsize{14}{17}\selectfont\bfseries] at (4.1,4.6) {default};
+    \node[label] at (4.1,4.18) {\texttt{--max-staged-files 1}};
+    \draw[slot,line width=1.2pt] (2.55,1.4) rectangle (5.65,3.85);
+    \fileicon[1.9]{4.1}{2.62}{DTGreen}
+    \node[text=DTGreen,font=\fontsize{9}{11}\selectfont\bfseries] at (4.1,1.08) {one occupied slot};
+
+    \node[text=DTInk,font=\fontsize{14}{17}\selectfont\bfseries] at (11.3,4.6) {bounded prefetch};
+    \node[label] at (11.3,4.18) {\texttt{--max-staged-files N}};
+    \foreach \x in {0,...,3}{
+      \draw[slot] (8.25+1.55*\x,1.4) rectangle (9.55+1.55*\x,3.85);
+    }
+    \foreach \x in {0,...,2}{
+      \fileicon[1.5]{8.9+1.55*\x}{2.62}{DTGreen}
+    }
+    \node[text=DTMuted,font=\fontsize{11}{13}\selectfont] at (13.55,2.62) {empty};
+    \node[text=DTGreen,font=\fontsize{9}{11}\selectfont\bfseries] at (11.3,1.08) {never more than N staged files};
+
+    \draw[flow] (5.85,2.62)--(8.12,2.62);
+    \node[chip,font=\fontsize{9}{11}\selectfont] at (6.95,3.3) {optional};
+
+    \node[cardred,minimum width=4.6cm,minimum height=1.0cm] at (7.75,.02)
+      {\fontsize{10.5}{13}\selectfont capacity $\approx N\times$ largest selected file};
+  \end{tikzpicture}

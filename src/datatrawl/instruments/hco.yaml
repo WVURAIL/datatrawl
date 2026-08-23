@@ -1,0 +1,9 @@
+# Hat Creek Outrigger (HCO). CHIME-compatible channelization, so it inherits all
+# of CHIME's geometry via `extends` and overrides only the feed count and scope.
+name: hco
+extends: chime
+
+n_feeds: 256             # outriggers (CHIME is 2048); same across gbo/hco/kko
+
+scopes:
+  - hco.event.baseband.raw

@@ -1,0 +1,1394 @@
+"""
+datatrawl CLI.
+
+Start by listing the available components:
+  datatrawl list                 show every registered component
+  datatrawl list telescopes      telescope readiness and geometry
+  datatrawl list readers         file-format readers
+  datatrawl list analyzers       science plugins
+  datatrawl list sources         where data comes from
+  datatrawl doctor               show the startup checks and usable combinations
+  datatrawl doctor --telescope chime --source cadc-datatrail \\
+                   --reader chime-baseband --analyzer spectrum
+                                 check one selected combination
+
+Run:
+  datatrawl survey --telescope chime --source cadc-datatrail \\
+      --scope chime.event.baseband.raw --freq-ids 844 \\
+      --max-events 5 --name chime-spectrum-844
+  datatrawl explore --name chime-spectrum-844
+  datatrawl scan --name chime-spectrum-844 --analyzer spectrum \\
+      --select 844 --max-frames-per-file 5
+                            # telescope/source/reader read from the inventory
+
+A scan combines four choices: telescope, source, reader, and analyzer. Before
+starting a long run, use `doctor` to check the selected combination and its
+prerequisites. `survey` records the telescope, source, and reader in a named
+inventory directory under `~/datatrawl-inventories/` (named
+`<telescope>-fid<freq_ids>` by default, or the value passed to `--name`). A later `scan` therefore needs the inventory and analyzer; explicit
+`--telescope`, `--source`, and `--reader` values override the recorded choices.
+"""
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import os
+import re
+import shutil
+import sys
+import tempfile
+import textwrap
+from typing import List, Sequence
+
+from . import __version__
+from . import cli_inventory
+from . import instruments as inst_mod
+from . import invpaths
+from . import pipeline
+from . import registry
+from .interfaces import (DataSource, RunContext, READY, EXPERIMENTAL, STUB,
+                         SurveyUnavailableError, stream_compatibility)
+from .names import validate_identifier
+from .validation import validate_pipeline, validate_plugin_class
+
+
+# --------------------------------------------------------------------------
+# tiny ASCII table helper (no deps; renders cleanly over SSH on CANFAR)
+# --------------------------------------------------------------------------
+def _table(headers: Sequence[str], rows: Sequence[Sequence[str]]) -> str:
+    string_rows = [[str(cell) for cell in row] for row in rows]
+    string_headers = [str(header) for header in headers]
+    cols = (list(zip(*([string_headers] + string_rows)))
+            if string_rows else [(header,) for header in string_headers])
+    widths = [max(len(cell) for cell in col) for col in cols]
+    minimums = [len(header) for header in string_headers]
+    available = max(40, shutil.get_terminal_size(fallback=(120, 24)).columns)
+    separators = 2 * max(0, len(widths) - 1)
+    while sum(widths) + separators > available:
+        shrinkable = [i for i, width in enumerate(widths)
+                      if width > minimums[i]]
+        if not shrinkable:
+            break
+        widest = max(shrinkable, key=lambda i: widths[i] - minimums[i])
+        widths[widest] -= 1
+
+    def _physical_lines(row: Sequence[str]) -> list[str]:
+        wrapped = [textwrap.wrap(cell, width=width,
+                                 break_long_words=True,
+                                 break_on_hyphens=False) or [""]
+                   for cell, width in zip(row, widths)]
+        height = max(len(cell_lines) for cell_lines in wrapped)
+        return ["  ".join(
+            f"{(cell_lines[line_no] if line_no < len(cell_lines) else ''):<{width}}"
+            for cell_lines, width in zip(wrapped, widths)
+        ).rstrip() for line_no in range(height)]
+
+    line = "  ".join("{:<{}}".format(h, w)
+                     for h, w in zip(string_headers, widths))
+    sep = "  ".join("-" * w for w in widths)
+    out = [line, sep]
+    for row in string_rows:
+        out.extend(_physical_lines(row))
+    return "\n".join(out)
+
+
+_MARK = {True: "[OK]", False: "[ ]"}
+_SKIP = "[--]"          # a check that could not run (non-fatal); see doctor notes
+_MAX_PRODUCT_STEM_LENGTH = 96
+_PRODUCT_STEM_HASH_LENGTH = 10
+_DEFAULT_SURVEY_WORKERS = 12
+
+
+# --------------------------------------------------------------------------
+# list
+# --------------------------------------------------------------------------
+def _list_telescopes() -> str:
+    rows = []
+    for r in inst_mod.all_readiness():
+        miss = ", ".join(r.missing()) or "-"
+        rows.append([r.name, r.status, miss])
+    return ("Telescopes (instruments/*.yaml)\n" +
+            _table(["name", "status", "missing"], rows))
+
+
+def _list_kind(kind: str, title: str) -> str:
+    rows = []
+    for info in registry.describe(kind):
+        rows.append([info.name, info.status,
+                     ", ".join(info.instruments) or "-", info.summary])
+    return f"{title}\n" + _table(["name", "status", "instruments", "summary"], rows)
+
+
+def cmd_list(args) -> int:
+    what = (args.what or "all").lower()
+    blocks = []
+    if what in ("all", "telescopes"):
+        blocks.append(_list_telescopes())
+    if what in ("all", "sources"):
+        blocks.append(_list_kind("source", "Data sources (where data lives)"))
+    if what in ("all", "readers"):
+        blocks.append(_list_kind("reader", "Readers (file formats)"))
+    if what in ("all", "analyzers"):
+        blocks.append(_list_kind("analyzer", "Analyzers (science plugins)"))
+    if not blocks:
+        print(f"unknown list target {args.what!r}; "
+              f"try: telescopes | sources | readers | analyzers | all",
+              file=sys.stderr)
+        return 2
+    print("\n\n".join(blocks))
+    return 0
+
+
+# --------------------------------------------------------------------------
+# doctor
+# --------------------------------------------------------------------------
+def _plugins_share_instrument(left, right) -> bool:
+    """Whether two PluginInfo declarations overlap on at least one instrument."""
+    return ("*" in left.instruments or "*" in right.instruments or
+            bool(set(left.instruments) & set(right.instruments)))
+
+
+def _ready_combos() -> List[tuple]:
+    """(telescope, source, reader, analyzer) tuples where every part is usable.
+
+    A part is "usable" when its plugin is READY; a telescope is usable when it
+    satisfies the chosen source's config needs (full archive config for CADC,
+    geometry + Nyquist zone only for a local source).
+    """
+    readiness = {r.name: r for r in inst_mod.all_readiness()}
+    srcs = [i for i in registry.describe("source") if i.status == READY]
+    rdrs = [i for i in registry.describe("reader") if i.status == READY]
+    analyzers = [i for i in registry.describe("analyzer") if i.status == READY]
+    combos = []
+    for analyzer in analyzers:
+        for rdr in rdrs:
+            # A "ready" combination must have a complete, matching stream
+            # contract.
+            if not _plugins_share_instrument(rdr, analyzer):
+                continue
+            if stream_compatibility(rdr, analyzer).compatible is not True:
+                continue
+            # instruments the reader+analyzer jointly support ("*" = any known)
+            names = set(readiness)
+            if "*" not in rdr.instruments and rdr.instruments:
+                names &= set(rdr.instruments)
+            if "*" not in analyzer.instruments and analyzer.instruments:
+                names &= set(analyzer.instruments)
+            for src in srcs:
+                src_names = (names if "*" in src.instruments or not src.instruments
+                             else names & set(src.instruments))
+                for tel in sorted(src_names):
+                    r = readiness.get(tel)
+                    if r is not None and r.usable_for(src.needs_archive_config):
+                        combos.append((tel, src.name, rdr.name, analyzer.name))
+    return combos
+
+def _overview_checklist() -> str:
+    lines = [
+        "datatrawl -- readiness check",
+        "=" * 28,
+        "",
+        "datatrawl has two jobs:",
+        "",
+        "  survey   build a local inventory from Datatrail/CADC or another source",
+        "  scan     stream inventory units through a reader and analyzer",
+        "",
+        "For a scan, the core choices are:",
+        "",
+        "  1. source      where files are staged from        (list sources)",
+        "  2. reader      the file format                    (list readers)",
+        "  3. analyzer    science plugin to run             (list analyzers)",
+        "",
+        "For telescope archive data, also choose:",
+        "",
+        "  4. telescope   band/channelization geometry      (list telescopes)",
+        "",
+        "Examples:",
+        "",
+        "  # Datatrail survey, then scan by inventory name",
+        "  datatrawl survey --telescope chime --source cadc-datatrail \\",
+        "      --scope chime.event.baseband.raw --freq-ids 844 --name <name>",
+        "  datatrawl explore --name <name>",
+        "  datatrawl scan --name <name> --analyzer spectrum --select 844",
+        "",
+        "  # local files already on disk",
+        "  datatrawl scan --source local --source-root <dir> --telescope chime \\",
+        "      --reader chime-baseband --analyzer spectrum --select 844",
+        "",
+    ]
+
+    combos = _ready_combos()
+    if combos:
+        lines.append("Ready scan combinations:")
+        rows = [[t, s, r, a] for (t, s, r, a) in combos]
+        lines.append("  " + _table(["telescope", "source", "reader", "analyzer"],
+                                    rows).replace("\n", "\n  "))
+        lines.append("")
+
+    stubs = [f"{i.name} ({k})" for k in ("reader", "analyzer")
+             for i in registry.describe(k) if i.status == STUB]
+    if stubs:
+        lines.append("Stubs awaiting implementation: " + ", ".join(sorted(stubs)))
+        lines.append("  (visible in `list`, but `scan` will refuse until built)")
+        lines.append("")
+
+    lines.append("Run `doctor` with a chosen combination for exact prerequisites, e.g.:")
+    lines.append("  datatrawl doctor --telescope chime --source local --reader chime-baseband --analyzer spectrum")
+    return "\n".join(lines)
+
+
+def _check(ok: bool, label: str, fix: str = "") -> str:
+    mark = _MARK[bool(ok)]
+    if ok or not fix:
+        return f"  {mark} {label}"
+    return f"  {mark} {label}\n         -> {fix}"
+
+
+def cmd_doctor(args) -> int:
+    chose_any = any([args.telescope, args.source, args.reader, args.analyzer])
+    if not chose_any:
+        print(_overview_checklist())
+        return 0
+
+    print("datatrawl -- readiness check")
+    print("=" * 28)
+    all_ok = True
+    any_skipped = False
+
+    # Does the chosen source require the telescope's archive-access fields?
+    # Consult the plugin's declared flag rather than hardcoding source names.
+    src_needs_archive = False
+    if args.source:
+        try:
+            src_needs_archive = registry.get("source", args.source).info.needs_archive_config
+        except KeyError:
+            src_needs_archive = False
+
+    # --- telescope ---
+    instrument = None
+    if args.telescope:
+        try:
+            instrument = inst_mod.load_instrument(args.telescope)
+            rd = inst_mod.instrument_readiness(args.telescope)
+            print("Telescope:", args.telescope)
+            print(_check(rd.nyquist_zone_set, "Nyquist zone set",
+                         f"set nyquist_zone in instruments/{args.telescope}.yaml"))
+            # a built-in survey scope only matters for an archive source
+            if src_needs_archive:
+                print(_check(rd.scopes_set, "datatrail scope(s) set",
+                             f"add a scopes: [...] list in "
+                             f"instruments/{args.telescope}.yaml (or pass --scope)"))
+            all_ok &= rd.nyquist_zone_set
+            if src_needs_archive:
+                all_ok &= rd.scopes_set
+        except Exception as exc:                       # noqa: BLE001
+            print(_check(False, f"telescope '{args.telescope}'", str(exc)))
+            all_ok = False
+    else:
+        print(_check(False, "telescope chosen", "pass --telescope <name>"))
+        all_ok = False
+
+    # Plugin preflights require a fully validated instrument. A malformed config
+    # is already a hard telescope failure above; never turn that into skipped
+    # preflights followed by a false READY result.
+    ctx = (RunContext(instrument=instrument, options=_collect_options(args))
+           if instrument is not None else None)
+
+    # --- source ---
+    if args.source:
+        _ok, _sk = _doctor_plugin("source", args.source, ctx)
+        all_ok &= _ok
+        any_skipped |= _sk
+    else:
+        print(_check(False, "source chosen", "pass --source <name>"))
+        all_ok = False
+
+    # --- reader ---
+    if args.reader:
+        _ok, _sk = _doctor_plugin("reader", args.reader, ctx)
+        all_ok &= _ok
+        any_skipped |= _sk
+    else:
+        print(_check(False, "reader chosen", "pass --reader <name>"))
+        all_ok = False
+
+    # --- analyzer ---
+    if args.analyzer:
+        _ok, _sk = _doctor_plugin("analyzer", args.analyzer, ctx)
+        all_ok &= _ok
+        any_skipped |= _sk
+    else:
+        print(_check(False, "analyzer chosen", "pass --analyzer <name>"))
+        all_ok = False
+
+    # --- reader -> analyzer data contract ---
+    if args.reader and args.analyzer:
+        try:
+            reader_info = registry.get("reader", args.reader).info
+            analyzer_info = registry.get("analyzer", args.analyzer).info
+        except KeyError:
+            pass  # the individual plugin check already printed the lookup error
+        else:
+            contract = stream_compatibility(reader_info, analyzer_info)
+            print("Compatibility:")
+            if contract.compatible:
+                print(_check(True, "reader/analyzer stream contract"))
+                print(f"         {contract.detail}")
+            else:
+                print(_check(False, "reader/analyzer stream contract",
+                             contract.detail + ". Choose a matching pair."))
+                all_ok = False
+
+    # --- cross-cutting deps ---
+    print("Environment:")
+    env_ok = _importable("numpy")
+    print(_check(env_ok, "numpy", "pip install numpy"))
+    all_ok &= env_ok
+    if args.reader == "chime-baseband":
+        env_ok = _importable("h5py")
+        print(_check(env_ok, "h5py (CHIME baseband reader)", "pip install h5py"))
+        all_ok &= env_ok
+    if args.gpu:
+        env_ok = _importable("cupy")
+        print(_check(env_ok, "cupy (for --gpu)",
+                     "run `datatrawl setup-cupy --install` to add the matching cupy"))
+        all_ok &= env_ok
+
+    print("")
+    if all_ok and any_skipped:
+        print("READY: core checks passed, but some were SKIPPED (see [--] above) -- "
+              "re-run doctor once datatrail is reachable to validate them.")
+    elif all_ok:
+        print("READY: all checks passed -- you can scan.")
+    else:
+        print("NOT READY: resolve the unchecked items above, then re-run doctor.")
+    return 0 if all_ok else 1
+
+
+def _doctor_plugin(kind: str, name: str, ctx) -> tuple[bool, bool]:
+    label = kind.capitalize()
+    try:
+        cls = registry.get(kind, name)
+    except KeyError as exc:
+        print(f"{label}: {name}")
+        print(_check(False, f"{kind} '{name}' registered", str(exc)))
+        return False, False
+    info = cls.info
+    print(f"{label}: {name}  ({info.status})")
+    report = validate_plugin_class(kind, cls, ctx, run_preflight=(ctx is not None))
+    implemented = info.status != STUB and info.status in (READY, EXPERIMENTAL)
+    print(_check(implemented, f"{kind} implemented"
+                 + (" (experimental)" if info.status == EXPERIMENTAL else ""),
+                 f"'{name}' cannot run with status {info.status!r}"))
+    for warning in report.warnings:
+        print(f"  {_SKIP} {warning}")
+    for note in report.notes:
+        print(f"  {_SKIP} {note}")
+    for problem in report.errors:
+        print(_check(False, "prerequisite", problem))
+    if report.ok and ctx is not None:
+        print(_check(True, "prerequisites satisfied"))
+    return report.ok, bool(report.notes or report.warnings)
+
+
+def _importable(mod: str) -> bool:
+    import importlib.util
+    return importlib.util.find_spec(mod) is not None
+
+
+# --------------------------------------------------------------------------
+# run: survey / scan
+# --------------------------------------------------------------------------
+def _parse_opt_value(v: str):
+    """Best-effort typing for a --set value: bool, None, int, float, else str."""
+    low = v.strip().lower()
+    if low in ("true", "false"):
+        return low == "true"
+    if low in ("none", "null"):
+        return None
+    for cast in (int, float):
+        try:
+            return cast(v)
+        except ValueError:
+            pass
+    return v.strip()
+
+
+def _parse_set_options(pairs) -> dict:
+    """Turn repeated `--set key=value` into a dict the analyzer reads via ctx.options."""
+    out = {}
+    for item in (pairs or ()):
+        if "=" not in item:
+            raise SystemExit(f"--set expects key=value, got {item!r}")
+        k, v = item.split("=", 1)
+        key = k.strip()
+        if key != k or not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_.-]*", key):
+            raise SystemExit(
+                f"--set key {key!r} is invalid; use a non-empty identifier")
+        if key in out:
+            raise SystemExit(
+                f"--set key {key!r} was provided more than once; pass one "
+                "unambiguous value")
+        out[key] = _parse_opt_value(v)
+    return out
+
+
+def _collect_options(args) -> dict:
+    opts = {
+        "root": getattr(args, "root", "."),
+        "inventory": getattr(args, "inventory", None),
+        "source_root": getattr(args, "source_root", None),
+        "source_glob": getattr(args, "source_glob", None) or "*.h5",
+        "source_freq_id_regex": getattr(args, "source_freq_id_regex", None),
+        "source_event_regex": getattr(args, "source_event_regex", None),
+        "gpu": getattr(args, "gpu", False),
+        "max_events": getattr(args, "max_events", None),
+        # survey-only knobs (absent on other subcommands -> harmless None/False)
+        "scope": getattr(args, "scope", None),
+        "freq_ids": getattr(args, "freq_ids", None),
+        "include_outrigger": getattr(args, "include_outrigger", False),
+        "workers": getattr(args, "workers", None),
+        "re_enumerate": getattr(args, "re_enumerate", False),
+        "empty_age_days": getattr(args, "empty_age_days", None),
+        "strict_completeness": getattr(args, "strict_completeness", False),
+        "scopes_only": getattr(args, "scopes_only", False),
+        "name": getattr(args, "name", None),
+        "match": getattr(args, "match", None),
+        "expand": getattr(args, "expand", False),
+        "max_inspect": getattr(args, "max_inspect", None),
+    }
+    # Analyzer-specific parameters travel through ctx.options, set generically with
+    # --set key=value (e.g. --set bracket_hz=400 for a detection analyzer), so the
+    # CLI stays analysis-agnostic.
+    plugin_options = _parse_set_options(getattr(args, "set_opts", None))
+    collisions = sorted(set(plugin_options) & set(opts))
+    if collisions:
+        flags = ", ".join(f"--{key.replace('_', '-')}" for key in collisions)
+        raise SystemExit(
+            f"--set is for plugin-specific values and cannot replace reserved "
+            f"option(s) {collisions!r}; use {flags} instead")
+    # Plugin values remain ordinary, non-colliding context options. Keeping one
+    # representation avoids aliasing every parameter under a second namespace.
+    opts.update(plugin_options)
+    return opts
+
+
+def _make_ctx(args):
+    try:
+        instrument = inst_mod.load_instrument(args.telescope)
+    except Exception as exc:  # configuration/file failures are user-facing
+        raise SystemExit(
+            f"invalid telescope {args.telescope!r}: "
+            f"{type(exc).__name__}: {exc}") from exc
+    return instrument, RunContext(
+        instrument=instrument, options=_collect_options(args))
+
+
+def _report_execution_validation(report) -> bool:
+    """Render one shared eligibility/preflight report; return whether it passed."""
+    for warning in report.warnings:
+        print(f"warning: {warning}", file=sys.stderr)
+    for note in report.notes:
+        print(f"note: {note}", file=sys.stderr)
+    for problem in report.errors:
+        print(f"error: {problem}", file=sys.stderr)
+    return report.ok
+
+
+def _validate_survey_execution(args, ctx, source_cls, reader_cls):
+    """Validate the prerequisites used by this survey mode.
+
+    Event surveys need both Datatrail discovery and CADC object inspection, so
+    they run the selected source/reader preflights. Recon only calls Datatrail
+    and must not fail because a CADC certificate or client library is absent.
+    Dry-run deliberately performs structural eligibility checks only: it neither
+    constructs plugins nor probes local/network prerequisites.
+    """
+    scopes_only = bool(getattr(args, "scopes_only", False))
+    dry_run = bool(getattr(args, "dry_run", False))
+    cadc_datatrail = source_cls.info.name == "cadc-datatrail"
+    supports_survey = source_cls.survey is not DataSource.survey
+    run_preflight = (not dry_run and supports_survey
+                     and not (scopes_only and cadc_datatrail))
+    report = validate_pipeline(
+        ctx, source_cls=source_cls, reader_cls=reader_cls,
+        run_preflight=run_preflight)
+    if dry_run or not cadc_datatrail:
+        return report
+
+    # CadcDatatrailSource.preflight covers CADC/certificate requirements and,
+    # when installed, the Datatrail API/scope contract. Every survey mode
+    # requires Datatrail, so make its absence an explicit command error here.
+    from .plugins.sources._datatrail import Datatrail
+    if not Datatrail.installed():
+        report.errors.append(
+            "datatrail-cli is required for `datatrawl survey`; install the "
+            "survey dependencies with `pip install -e \".[survey]\"`")
+    elif scopes_only:
+        # Recon intentionally skipped the source's CADC-oriented preflight. It
+        # still needs the exact machine-readable Datatrail API it will invoke.
+        ok, detail = Datatrail.api_available()
+        if not ok:
+            report.errors.append(
+                "datatrail machine-readable API is unavailable: " + str(detail))
+    return report
+
+
+def cmd_survey(args) -> int:
+    # --telescope is optional for recon (--scopes-only): omitting it walks
+    # EVERY scope datatrail can see (zero-knowledge discovery); naming it
+    # narrows the walk to that telescope's scopes. The event survey still
+    # requires it -- geometry, default scopes, and the inventory's home dir
+    # all come from the instrument.
+    if not getattr(args, "telescope", None):
+        if not getattr(args, "scopes_only", False):
+            print("error: --telescope is required to survey events (it sets "
+                  "the geometry, the default scopes, and where the inventory "
+                  "lands). Only recon (--scopes-only) runs without one.",
+                  file=sys.stderr)
+            return 2
+        instrument = None
+        ctx = RunContext(instrument=None, options=_collect_options(args))
+    else:
+        instrument, ctx = _make_ctx(args)
+    if (getattr(args, "strict_completeness", False)
+            and getattr(args, "scopes_only", False)):
+        print("error: --strict-completeness applies to event surveys, not "
+              "--scopes-only recon", file=sys.stderr)
+        return 2
+    source_cls = _require_plugin("source", args.source)
+    # The reader owns the archive file shape (Reader.survey_files) -- which
+    # files one event contributes and what they are named -- so survey resolves
+    # the reader and threads it to the source on ctx.reader. --reader overrides;
+    # the telescope's canonical reader is the default (the same resolution
+    # `scan` records in the meta sidecar). Recon (--scopes-only) lists names
+    # only and needs no shape. An external shape reader loads with --plugin.
+    if getattr(args, "expand", False) and not getattr(args, "scopes_only", False):
+        print("note: --expand only applies to --scopes-only recon; ignored for "
+              "an event survey.", file=sys.stderr)
+    reader_name = (getattr(args, "reader", None)
+                   or getattr(instrument, "reader", "") or None)
+    reader_cls = None
+    if reader_name and not getattr(args, "scopes_only", False):
+        reader_cls = _require_plugin("reader", reader_name)
+    report = _validate_survey_execution(
+        args, ctx, source_cls, reader_cls)
+    if not _report_execution_validation(report):
+        return 2
+    if getattr(args, "scopes_only", False) and not args.out:
+        # the recon scope map lands at the inventory root (or <root>/data
+        # with --root), a level above the per-telescope inventory dirs: without --telescope it spans every
+        # telescope, and even narrowed it is a discovery map, not an inventory.
+        out_dir = (os.path.join(args.root, "data") if args.root
+                   else str(invpaths.inventory_root()))
+        name = None
+    elif args.out:
+        out_dir = args.out
+        name = getattr(args, "name", None) or os.path.basename(
+            os.path.normpath(args.out))
+    else:
+        # name the inventory deterministically from the survey spec, so multiple
+        # projects on one telescope land in separate dirs (and an identical
+        # re-survey resumes the same one). --name overrides the derived label.
+        name = getattr(args, "name", None) or cli_inventory.derive_inventory_name(
+            instrument.name, getattr(args, "freq_ids", None))
+        try:
+            name = validate_identifier(name, label="inventory name")
+        except ValueError as exc:
+            raise SystemExit(str(exc)) from exc
+        out_dir = (os.path.join(args.root, "data", name) if args.root
+                   else str(invpaths.inventory_dir_for_write(name)))
+    if getattr(args, "name", None):
+        try:
+            name = validate_identifier(args.name, label="inventory name")
+        except ValueError as exc:
+            raise SystemExit(str(exc)) from exc
+    print(f"[survey] {instrument.name if instrument else '(all scopes)'} "
+          f"via {args.source} -> {out_dir}")
+    if args.dry_run:
+        print("  dry-run: would survey")
+        return 0
+    src = source_cls()
+    if reader_cls is not None:
+        ctx.reader = reader_cls()
+    try:
+        path = src.survey(ctx, out_dir)
+    except NotImplementedError as exc:
+        print(f"error: {exc}\n"
+              "This source enumerates on demand; use `datatrawl explore` / "
+              "`datatrawl scan` directly, or implement survey() to write a "
+              "persistent inventory.", file=sys.stderr)
+        return 2
+    except SurveyUnavailableError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+    label = "scope map" if getattr(args, "scopes_only", False) else "inventory"
+    print(f"  {label}: {path}")
+    if not getattr(args, "scopes_only", False):
+        meta_path = cli_inventory.write_inventory_meta(
+            path, instrument, args.source, getattr(args, "freq_ids", None),
+            name=name, scope_request=getattr(args, "scope", None),
+            reader=reader_name)
+        print(f"  meta: {meta_path}")
+    if getattr(args, "strict_completeness", False):
+        issues = src.survey_completeness_issues(out_dir)
+        if issues is None:
+            print(
+                f"error: source {args.source!r} does not expose a survey "
+                "completeness contract; --strict-completeness cannot prove "
+                "this inventory complete", file=sys.stderr)
+            return 2
+        issues = {str(name): int(count) for name, count in issues.items()
+                  if int(count) > 0}
+        if issues:
+            detail = ", ".join(
+                f"{count} {name}" for name, count in sorted(issues.items()))
+            print(
+                "error: strict survey completeness failed: " + detail
+                + ". Inventory state and metadata were preserved; resolve "
+                "or explicitly accept the omissions, then rerun.",
+                file=sys.stderr)
+            return 1
+        print("  strict completeness: no unresolved or terminal omissions")
+    return 0
+
+
+# --------------------------------------------------------------------------
+# explore: "what is available?" -- no download, no analysis
+# --------------------------------------------------------------------------
+_FREQ_ID_RE = re.compile(r"_(\d+)\.h5$")
+
+
+def _human_bytes(n: int) -> str:
+    x = float(n)
+    for unit in ("B", "KB", "MB", "GB", "TB", "PB"):
+        if x < 1024 or unit == "PB":
+            return f"{int(x)} B" if unit == "B" else f"{x:.1f} {unit}"
+        x /= 1024
+    return f"{x:.1f} PB"
+
+
+def _freq_id_of(unit):
+    """The freq_id for a unit: from its metadata, else parsed from the name."""
+    m = unit.meta or {}
+    if m.get("freq_id") is not None:
+        try:
+            return int(m["freq_id"])
+        except (TypeError, ValueError):
+            return None
+    mo = _FREQ_ID_RE.search(unit.name or "")
+    return int(mo.group(1)) if mo else None
+
+
+def _print_availability(units, source_name: str, instrument, scan_hint=None) -> None:
+    from collections import Counter
+    by_freq_id: "Counter" = Counter()
+    dates: List[str] = []
+    nbytes = 0
+    n_no_freq_id = 0
+    for u in units:
+        fid = _freq_id_of(u)
+        if fid is None:
+            n_no_freq_id += 1
+        else:
+            by_freq_id[fid] += 1
+        m = u.meta or {}
+        d = str(m.get("obs_date") or "")[:10]
+        if d:
+            dates.append(d)
+        sb = m.get("size_bytes")
+        if not sb:
+            p = m.get("src_path")
+            if p and os.path.exists(p):
+                try:
+                    sb = os.path.getsize(p)
+                except OSError:
+                    sb = 0
+        nbytes += int(sb or 0)
+
+    tel = f" for telescope '{instrument.name}'" if instrument else ""
+    print(f"Available via source '{source_name}'{tel}")
+    print(f"  files          : {len(units)}")
+    if nbytes:
+        print(f"  total volume   : {_human_bytes(nbytes)}")
+    if dates:
+        print(f"  date span      : {min(dates)} .. {max(dates)}")
+    if by_freq_id:
+        freq_ids = sorted(by_freq_id)
+        print(f"  freq_ids       : {len(freq_ids)} present ({freq_ids[0]}..{freq_ids[-1]})")
+        rows = [[str(f), str(by_freq_id[f])] for f in freq_ids]
+        print("    " + _table(["freq_id", "files"], rows).replace("\n", "\n    "))
+    if n_no_freq_id:
+        print(f"  ({n_no_freq_id} file(s) with no parseable freq_id)")
+    if by_freq_id:
+        sample = ",".join(str(f) for f in sorted(by_freq_id)[:3])
+        print("\nTo run an analyzer on one or more of these freq_ids, add --select, e.g.:")
+        if scan_hint:
+            print(f"  datatrawl scan {scan_hint} --analyzer <analyzer> --select {sample}")
+            print("    (--name points back at this inventory; the telescope, source, and")
+            print("     reader are read from it, so you don't repeat those flags)")
+        else:
+            print(f"  datatrawl scan --analyzer <analyzer> --select {sample}")
+            print("    (a surveyed inventory stores telescope/source/reader; a local")
+            print("     directory has none, so pass --telescope, --source, and --reader)")
+
+
+def cmd_explore(args) -> int:
+    """Report WHAT is available for a source -- no download, no analysis.
+
+    For the exploratory 'I don't know my selection yet' case: enumerate the
+    holdings (an inventory for an archive source, a directory for local) and
+    summarize them -- freq_ids present, file counts, date span, total volume --
+    so a selection can be chosen empirically before committing to a scan.
+    """
+    # Resolve --name/--inventory (and backfill telescope/source/reader) from an
+    # inventory's meta sidecar, exactly as `scan` does -- so `explore --name X`
+    # finds the same inventory `survey` wrote instead of the telescope default.
+    cli_inventory.resolve_from_meta(args)
+    if not getattr(args, "source", None):
+        print("error: --source not provided and not resolvable from an inventory "
+              "meta. Pass --source (e.g. `--source local` or "
+              "`--source cadc-datatrail`), or --name/--inventory pointing at a "
+              "surveyed inventory (survey records the source).", file=sys.stderr)
+        return 2
+    source_cls = _require_plugin("source", args.source)
+    instrument = None
+    if getattr(args, "telescope", None):
+        try:
+            instrument = inst_mod.load_instrument(args.telescope)
+        except Exception as exc:                              # noqa: BLE001
+            print(f"error: invalid telescope {args.telescope!r}: "
+                  f"{type(exc).__name__}: {exc}",
+                  file=sys.stderr)
+            return 2
+    ctx = RunContext(
+        instrument=instrument, selection=None, options=_collect_options(args))
+    report = validate_plugin_class(
+        "source", source_cls, ctx, run_preflight=False)
+    if not _report_execution_validation(report):
+        return 2
+    try:
+        src = source_cls()
+    except Exception as exc:                                  # noqa: BLE001
+        print(f"error: could not construct source {args.source!r}: "
+              f"{type(exc).__name__}: {exc}", file=sys.stderr)
+        return 2
+    try:
+        units = list(src.enumerate(ctx))
+    except SystemExit as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+    except Exception as exc:                                  # noqa: BLE001
+        print(f"could not enumerate: {type(exc).__name__}: {exc}\n"
+              f"(an archive source needs --telescope, to locate its inventory, "
+              f"or an explicit --inventory)", file=sys.stderr)
+        return 1
+    if not units:
+        print("no data found. For an archive source, run `survey` first or pass "
+              "--inventory; for local, check --source-root / --source-glob.")
+        return 1
+    # Suggest a scan that points at the same inventory: prefer --name when the
+    # caller used it, else the resolved --inventory path; None for a local source.
+    if getattr(args, "name", None):
+        scan_hint = f"--name {args.name}"
+    elif getattr(args, "inventory", None):
+        scan_hint = f"--inventory {args.inventory}"
+    else:
+        scan_hint = None
+    _print_availability(units, args.source, instrument, scan_hint=scan_hint)
+    return 0
+
+
+def _require_plugin(kind: str, name: str):
+    """registry.get(), but turn a missing plugin into a clean, actionable error.
+
+    A surveyed inventory records source/reader names, but a custom module named
+    there is not auto-loaded. It must still be passed with --plugin (or discovered
+    through the environment / an entry point). Without this helper, registry.get()
+    raises a bare KeyError as an uncaught traceback.
+    """
+    try:
+        return registry.get(kind, name)
+    except KeyError as exc:
+        msg = exc.args[0] if exc.args else str(exc)
+        raise SystemExit(
+            f"{msg}\n  If {name!r} is a custom {kind} from your own project, load "
+            f"it with --plugin (or DATATRAWL_PLUGINS / an entry point) -- a "
+            f"source/reader/analyzer named in an inventory's meta is not "
+            f"auto-loaded. `datatrawl list` shows what is currently registered.")
+
+
+def _path_component(value) -> str:
+    """A short filesystem-safe component for plugin names and temp prefixes."""
+    text = re.sub(r"[^A-Za-z0-9_.-]+", "_", str(value or "")).strip("._")
+    return text or "unknown"
+
+
+def _scan_tmp_dir(args, instrument) -> tuple[str, bool]:
+    """Return (directory, is_auto_created) for this scan invocation.
+
+    Explicit --tmp-dir wins. Otherwise DATATRAWL_TMPDIR is the base, followed by
+    a writable /scratch, then the platform temp directory. Auto-created paths are
+    unique per invocation so concurrent scans cannot delete each other's files.
+    """
+    if getattr(args, "tmp_dir", None):
+        return os.path.abspath(os.path.expanduser(args.tmp_dir)), False
+
+    base = os.environ.get("DATATRAWL_TMPDIR")
+    if base:
+        base = os.path.abspath(os.path.expanduser(base))
+    elif os.path.isdir("/scratch") and os.access("/scratch", os.W_OK):
+        base = "/scratch"
+    else:
+        base = tempfile.gettempdir()
+    os.makedirs(base, exist_ok=True)
+
+    prefix = (f"datatrawl_{_path_component(instrument.name)}_"
+              f"{_path_component(args.analyzer)}_")
+    return tempfile.mkdtemp(prefix=prefix, dir=base), True
+
+
+def _default_quarantine_path(args, instrument) -> str:
+    """Source/reader-scoped quarantine ledger for this telescope."""
+    name = (f"{_path_component(args.source)}--"
+            f"{_path_component(args.reader)}.jsonl")
+    return os.path.join(args.root or os.getcwd(), "results", instrument.name, "quarantine", name)
+
+
+def cmd_scan(args) -> int:
+    cli_inventory.resolve_from_meta(args)  # explicit flags still win
+    missing = [f"--{k}" for k in ("telescope", "source", "reader")
+               if not getattr(args, k, None)]
+    if missing:
+        print(f"error: {', '.join(missing)} not provided and not resolvable from "
+              f"an inventory meta. Run `survey` first (it records telescope, "
+              f"source and reader), pass --inventory pointing at a surveyed "
+              f"inventory, or set them explicitly.", file=sys.stderr)
+        return 2
+    instrument, ctx = _make_ctx(args)
+    # --nfft overrides the analysis frame/FFT length for this run; the reader and
+    # analyzer both read it from ctx.instrument.nfft. fs is unaffected (it comes
+    # from the band geometry, not nfft).
+    if getattr(args, "nfft", None):
+        instrument.nfft = int(args.nfft)
+    source_cls = _require_plugin("source", args.source)
+    reader_cls = _require_plugin("reader", args.reader)
+    analyzer_cls = _require_plugin("analyzer", args.analyzer)
+    report = validate_pipeline(
+        ctx, source_cls=source_cls, reader_cls=reader_cls,
+        analyzer_cls=analyzer_cls, run_preflight=True)
+    if not _report_execution_validation(report):
+        return 2
+    src = source_cls()
+    rdr = reader_cls()
+    ctx.reader = rdr
+
+    # The analysis splits --select into independent runs (one product each).
+    # For the spectrum analyzer that is one run per freq_id: each <freq_id>.npz
+    # checkpoints and resumes on its own, which is what makes a long multi-freq_id
+    # pull self-healing rather than all-or-nothing.
+    runs = analyzer_cls().plan_runs(ctx, args.select)
+    if not runs:
+        print("nothing to do: --select resolved to an empty set", file=sys.stderr)
+        return 1
+    if args.out and len(runs) > 1:
+        print("error: --out names a single file but this selection fans out to "
+              f"{len(runs)} products. Omit --out (they go to "
+              f"results/{instrument.name}/{args.analyzer}/<stem>.npz) or scan "
+              "one at a time.",
+              file=sys.stderr)
+        return 1
+
+    tmp, auto_tmp = _scan_tmp_dir(args, instrument)
+
+    # Quarantine is scoped to the source/reader pair. The ledger stores stable
+    # unit identities, so unrelated files that share a basename are not excluded.
+    if getattr(args, "no_quarantine", False):
+        quarantine_path = None
+    else:
+        quarantine_path = args.quarantine or _default_quarantine_path(args, instrument)
+
+    print(f"[scan] {instrument.name}  source={args.source}  reader={args.reader}  "
+          f"analyzer={args.analyzer}  ({len(runs)} product(s))")
+
+    total_failed = 0
+    total_quarantined = 0
+    done_products = 0
+    incomplete_products = 0
+    try:
+        for i, sub_sel in enumerate(runs, 1):
+            ctx.selection = sub_sel
+            units = list(src.enumerate(ctx))
+            out = args.out or _default_product_path(args, instrument, sub_sel)
+            tag = f"[{i}/{len(runs)}] select={sub_sel}"
+            if not units:
+                print(f"  {tag}: no units matched -- skipping", flush=True)
+                incomplete_products += 1
+                continue
+            print(f"  {tag}  units={len(units)} -> {out}", flush=True)
+            if args.dry_run:
+                for u in units[:3]:
+                    print(f"      would process: {u.name}")
+                if len(units) > 3:
+                    print(f"      ... and {len(units) - 3} more")
+                continue
+            analyzer = analyzer_cls()           # FRESH analyzer per product
+            try:
+                res = pipeline.run(
+                    source=src, reader=rdr, analyzer=analyzer, units=units,
+                    out_path=out, tmp_dir=tmp, ctx=ctx,
+                    checkpoint_every=args.checkpoint_every,
+                    download_workers=args.download_workers,
+                    max_staged_files=args.max_staged_files,
+                    max_files=args.max_files,
+                    max_frames_per_file=args.max_frames_per_file,
+                    quarantine_path=quarantine_path,
+                    verbose=(len(runs) == 1),
+                )
+            except pipeline.ActiveDownloadWorkersError:
+                # A source is still writing in this directory. Removing an
+                # automatically-created scratch tree here would race that
+                # worker and hide any later cleanup failure.
+                auto_tmp = False
+                raise
+            except pipeline.OutputLockedError as exc:
+                print(f"error: {exc}", file=sys.stderr)
+                return 2
+            except pipeline.QuarantineLedgerLockError as exc:
+                print(f"error: {exc}", file=sys.stderr)
+                return 2
+            total_failed += res.n_failed
+            total_quarantined += res.n_quarantined
+            if res.product_available:
+                done_products += 1
+            else:
+                incomplete_products += 1
+
+        if not args.dry_run:
+            msg = (f"\nscan complete: {done_products}/{len(runs)} product(s), "
+                   f"{total_failed} file failure(s)")
+            if total_quarantined:
+                msg += (f", {total_quarantined} file(s) quarantined as bad "
+                        f"(see {quarantine_path})")
+            if incomplete_products:
+                msg += f", {incomplete_products} product(s) not created"
+            if total_failed:
+                msg += (" -- re-run the same command to retry the failures (resume "
+                        "skips everything already done).")
+            print(msg)
+        return 0 if total_failed == 0 and incomplete_products == 0 else 1
+    finally:
+        if auto_tmp:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+
+def _default_product_path(args, instrument, selection) -> str:
+    # Namespaced by analyzer so two analyses never collide on the same
+    # <freq_id>.npz (e.g. spectrum's products live under results/<tel>/spectrum/).
+    instrument_name = validate_identifier(
+        instrument.name, label="instrument name")
+    analyzer_name = validate_identifier(args.analyzer, label="analyzer name")
+    base = os.path.join(
+        args.root or os.getcwd(), "results", instrument_name, analyzer_name)
+    force_hash = False
+    if isinstance(selection, dict):
+        # the structured form a per-event plan_runs returns, e.g.
+        # {"events": ["349382977"], "freq_ids": "506-844"} -> ev349382977_506-844
+        parts = []
+        ev = selection.get("events")
+        if ev:
+            ev = [ev] if isinstance(ev, (int, str)) else list(ev)
+            parts.append("ev" + "-".join(str(e) for e in ev))
+        fid = selection.get("freq_ids")
+        if fid not in (None, "", "all", "*"):
+            fid = [fid] if isinstance(fid, (int, str)) else list(fid)
+            parts.append("_".join(str(f).replace(",", "_") for f in fid))
+        if parts:
+            raw_stem = "_".join(parts)
+            force_hash = bool(set(selection) - {"events", "freq_ids"})
+        else:
+            raw_stem = json.dumps(
+                selection, sort_keys=True, separators=(",", ":"), default=str)
+            force_hash = True
+    elif isinstance(selection, (list, tuple)):
+        raw_stem = "_".join(str(s) for s in selection) if selection else "all"
+    elif selection is None:
+        raw_stem = "all"
+    else:
+        raw_stem = (str(selection).strip().replace(",", "_")
+                    .replace(" ", "") or "all")
+    stem = (re.sub(r"[^A-Za-z0-9._-]+", "_", raw_stem)
+            .replace("..", "_").strip("._") or "all")
+    changed = stem != raw_stem
+    if force_hash or changed or len(stem) > _MAX_PRODUCT_STEM_LENGTH:
+        identity = json.dumps(
+            selection, sort_keys=True, separators=(",", ":"), default=str)
+        digest = hashlib.sha256(identity.encode("utf-8")).hexdigest()
+        suffix = digest[:_PRODUCT_STEM_HASH_LENGTH]
+        prefix_length = _MAX_PRODUCT_STEM_LENGTH - len(suffix) - 1
+        prefix = stem[:prefix_length].rstrip("._-") or "selection"
+        stem = f"{prefix}-{suffix}"
+    return os.path.join(base, f"{stem}.npz")
+
+
+# --------------------------------------------------------------------------
+# parser
+# --------------------------------------------------------------------------
+def positive_int(s: str) -> int:
+    """argparse type: a strictly positive integer (rejects 0 and negatives)."""
+    try:
+        v = int(s)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"expected an integer, got {s!r}")
+    if v <= 0:
+        raise argparse.ArgumentTypeError(f"must be a positive integer, got {v}")
+    return v
+
+
+def nonneg_int(s: str) -> int:
+    """argparse type: an integer >= 0 (0 is meaningful for age thresholds)."""
+    try:
+        v = int(s)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"expected an integer, got {s!r}")
+    if v < 0:
+        raise argparse.ArgumentTypeError(f"must be >= 0, got {v}")
+    return v
+
+
+def cmd_setup_cupy(args) -> int:
+    """Report or install the CuPy build matching this session's CUDA.
+
+    datatrawl prefers the CuPy the session image already ships, so this only acts when
+    the image has none. It calls datatrawl.accel.ensure_cupy -- the same resolution a
+    scan uses to pick an array module -- so a scan itself never installs anything; it
+    only uses what is importable.
+    """
+    from . import accel
+
+    try:
+        cp = accel.import_cupy()
+    except RuntimeError as exc:
+        print(f"[gpu] {exc}", file=sys.stderr)
+        return 1
+    if cp is not None:
+        print(f"[gpu] cupy {getattr(cp, '__version__', '?')} already available from the "
+              "session image -- nothing to do.")
+        return 0
+
+    major = accel.detect_cuda_major()
+    if major is None:
+        print("[gpu] cupy is not installed and the CUDA version could not be detected "
+              "(no nvidia-smi/nvcc and no CUDA version file).", file=sys.stderr)
+        print("      Install the cupy build matching your image manually, "
+              "e.g. `pip install cupy-cuda12x`.", file=sys.stderr)
+        return 1
+
+    pkg = accel.cupy_package(major)
+    if not args.install:
+        print(f"[gpu] no cupy in this environment. Detected CUDA {major}.x.")
+        print(f"      Re-run with --install to install {pkg}.")
+        return 1
+
+    try:
+        cp = accel.ensure_cupy(install=True)
+    except Exception as exc:
+        print(f"[gpu] {exc}", file=sys.stderr)
+        return 1
+    print(f"[gpu] installed and imported cupy {getattr(cp, '__version__', '?')} "
+          f"({pkg}) -- scan --gpu is ready.")
+    return 0
+
+
+def build_parser() -> argparse.ArgumentParser:
+    ap = argparse.ArgumentParser(
+        prog="datatrawl", description=__doc__,
+        formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--version", action="version",
+                    version=f"%(prog)s {__version__}")
+    sub = ap.add_subparsers(dest="cmd", required=True)
+
+    # Shared by every subcommand: load extra plugin modules so an analyzer/reader/
+    # source living in YOUR project (not this repo) becomes first-class here.
+    common = argparse.ArgumentParser(add_help=False)
+    common.add_argument(
+        "--plugin", action="append", default=[], metavar="MODULE_OR_PATH",
+        help="load an external plugin (repeatable). Pass a dotted module "
+             "('mypkg.analyzers.my_analyzer') or a .py path. Plugins may also be "
+             "loaded through DATATRAWL_PLUGINS or package entry points.")
+
+    p_list = sub.add_parser("list", parents=[common],
+                            help="show available telescopes/sources/readers/analyzers")
+    p_list.add_argument("what", nargs="?", default="all",
+                        help="telescopes | sources | readers | analyzers | all")
+    p_list.set_defaults(func=cmd_list)
+
+    p_doctor = sub.add_parser("doctor", parents=[common],
+                              help="check the prerequisites for a pipeline")
+    p_doctor.add_argument("--telescope",
+                          help="telescope to check (see `datatrawl list telescopes`)")
+    p_doctor.add_argument("--source",
+                          help="source plugin to check")
+    p_doctor.add_argument("--reader",
+                          help="reader plugin to check")
+    p_doctor.add_argument("--analyzer",
+                          help="analyzer plugin to check")
+    p_doctor.add_argument("--gpu", action="store_true",
+                          help="also check the GPU prerequisite (cupy) that "
+                               "`scan --gpu` needs")
+    p_doctor.add_argument("--source-root", default=None,
+                          help="local source: input directory, so the source's "
+                               "preflight can check it")
+    p_doctor.add_argument(
+        "--set", dest="set_opts", action="append", metavar="KEY=VALUE",
+        help="plugin-specific parameter passed via ctx.options (repeatable)")
+    p_doctor.set_defaults(func=cmd_doctor)
+
+    p_survey = sub.add_parser("survey", parents=[common],
+                              help="build an analysis inventory from an archive")
+    p_survey.add_argument("--telescope", default=None,
+                          help="telescope whose scopes to survey (e.g. chime). "
+                               "Required for an event survey; optional for recon "
+                               "(--scopes-only), where naming it narrows the walk "
+                               "to that telescope's scopes and omitting it walks "
+                               "every scope datatrail can see.")
+    p_survey.add_argument("--source", default="cadc-datatrail",
+                          help="source plugin to use (default: cadc-datatrail)")
+    p_survey.add_argument("--root", default=None,
+                          help="optional working root; the inventory then "
+                               "lands under <root>/data/ (default: "
+                               "~/datatrawl-inventories/)")
+    p_survey.add_argument("--out", default=None,
+                          help="explicit inventory output directory "
+                               "(overrides the default location)")
+    p_survey.add_argument("--name", default=None,
+                          help="name this inventory (default: derived from "
+                               "telescope + freq_ids). With --scopes-only, "
+                               "names the recon map instead -> "
+                               "scopes-<name>.jsonl at the inventory root, so "
+                               "successive recons (gains, n2) don't overwrite "
+                               "each other.")
+    p_survey.add_argument("--reader", default=None,
+                          help="reader whose archive file shape drives the survey "
+                               "(which files one event contributes; see "
+                               "Reader.survey_files). Default: the telescope's "
+                               "canonical reader. Load an external one with "
+                               "--plugin.")
+    p_survey.add_argument("--scope", default=None,
+                          help="Datatrail scope(s) to walk, comma-separated. Defaults "
+                               "to the telescope's declared scopes (chime: the two "
+                               "CHIME baseband scopes).")
+    p_survey.add_argument("--freq-ids", default=None,
+                          help="CHIME-baseband freq_id selection: a list "
+                               "'614,706', a range '506-844', or 'all'.")
+    p_survey.add_argument("--include-outrigger", action="store_true",
+                          help="CHIME-baseband event survey only: keep events carrying an outrigger label "
+                               "(default: blocklisted)")
+    p_survey.add_argument(
+        "--workers", type=positive_int, default=_DEFAULT_SURVEY_WORKERS,
+        help=("CHIME-baseband event/freq_id survey only: parallel cadcinfo "
+              f"probes per event (default {_DEFAULT_SURVEY_WORKERS})"))
+    p_survey.add_argument("--re-enumerate", action="store_true",
+                          help="rebuild the phase-1 event cache instead of reusing it")
+    p_survey.add_argument("--max-events", type=positive_int, default=None,
+                          help="CHIME-baseband event/freq_id survey only: survey at "
+                               "most N not-yet-done events this run, then stop "
+                               "(resumable; handy for a quick smoke test).")
+    p_survey.add_argument("--empty-age-days", type=nonneg_int, default=None,
+                          metavar="N",
+                          help="CHIME-baseband event/freq_id survey only: accept a "
+                               "0-file event (Common Path resolves; every probe a "
+                               "definitive cadcinfo NotFound or sub-floor size) on "
+                               "FIRST sighting when its observation date is at "
+                               "least N days old -- replication is long settled by "
+                               "then, so the absence is permanent (default 30). "
+                               "Younger events, and events whose Common Path "
+                               "carries no date, keep the 3-attempt cross-resume "
+                               "re-check. 0 accepts every dated empty event "
+                               "immediately; a very large N restores the pure "
+                               "3-attempt behavior. Accepted events are recorded "
+                               "in no_files_events.jsonl with a reason.")
+    p_survey.add_argument(
+        "--strict-completeness", action="store_true",
+        help="after writing resumable state and inventory metadata, exit nonzero "
+             "if any event is still pending, terminally incomplete, or refused "
+             "by the Datatrail contract; accepted-empty and definitive no-data "
+             "events remain explicit successful dispositions")
+    p_survey.add_argument("--scopes-only", action="store_true",
+                          help="recon: list datasets across the scope(s) WITHOUT "
+                               "enumerating events/files (a recursive `datatrail "
+                               "ls`). With no --scope, walks the telescope's "
+                               "scopes -- or every scope datatrail can see when "
+                               "--telescope is also omitted. Writes scopes.jsonl.")
+    p_survey.add_argument("--match", default=None,
+                          help="recon filter: comma-separated substrings; keep only "
+                               "scope/dataset names containing ALL of them "
+                               "(case-insensitive).")
+    p_survey.add_argument("--expand", action="store_true",
+                          help="recon (--scopes-only) only: open each kept dataset "
+                               "one level and write its CHILDREN to scopes.jsonl "
+                               "(rows gain a `parent` field), so every row is "
+                               "directly resolvable with `datatrail ps`. This is "
+                               "how a container hit like complex_gains becomes "
+                               "its timestamped acquisitions.")
+    p_survey.add_argument("--set", dest="set_opts", action="append", metavar="KEY=VALUE",
+                          help="source-specific parameter passed via ctx.options "
+                               "(repeatable), for a custom source's survey(), e.g. "
+                               "--set api_mode=bulk. Core option names are "
+                               "reserved and cannot be replaced here.")
+    p_survey.add_argument("--dry-run", action="store_true",
+                          help="print the survey target and exit without "
+                               "contacting the archive")
+    p_survey.set_defaults(func=cmd_survey)
+
+    p_expl = sub.add_parser(
+        "explore", parents=[common],
+        help="summarize an inventory or local source without staging data")
+    p_expl.add_argument("--source", default=None,
+                        help="data source; optional when --name/--inventory is "
+                             "given (read from the inventory meta, like `scan`)")
+    p_expl.add_argument("--telescope", default=None,
+                        help="needed for an archive source (locates its inventory)")
+    p_expl.add_argument("--inventory", default=None,
+                        help="explicit inventory.jsonl path (alternative to --name)")
+    p_expl.add_argument("--name", default=None,
+                        help="inventory name set by survey; alternative to "
+                             "--inventory (telescope/source/reader are read "
+                             "from its meta sidecar)")
+    p_expl.add_argument("--source-root", default=None,
+                        help="local source: directory to inspect")
+    p_expl.add_argument("--source-glob", default="*.h5",
+                        help="local source: file glob (default *.h5)")
+    p_expl.add_argument("--source-freq-id-regex", default=None,
+                        help="local source: regex with one group capturing the "
+                             "freq_id int from a filename")
+    p_expl.add_argument("--source-event-regex", default=None,
+                        help="local source: regex with one group capturing the "
+                             "event id from a filename")
+    p_expl.add_argument(
+        "--set", dest="set_opts", action="append", metavar="KEY=VALUE",
+        help="source-specific parameter passed via ctx.options (repeatable). "
+             "Core option names are reserved and cannot be replaced here.")
+    p_expl.add_argument("--root", default=None,
+                        help="working root containing data/ "
+                             "(default: current directory)")
+    p_expl.set_defaults(func=cmd_explore)
+
+    p_scan = sub.add_parser("scan", parents=[common],
+                            help="run the streaming analyzer")
+    p_scan.add_argument("--telescope", default=None,
+                        help="telescope geometry; inferred from the inventory "
+                             "meta when omitted")
+    p_scan.add_argument("--source", default=None,
+                        help="where files are fetched from; inferred from the "
+                             "inventory meta when omitted")
+    p_scan.add_argument("--reader", default=None,
+                        help="file-format reader; defaults to the telescope's "
+                             "canonical reader recorded in the inventory meta")
+    p_scan.add_argument("--analyzer", required=True,
+                        help="analyzer plugin to run "
+                             "(see `datatrawl list analyzers`)")
+    p_scan.add_argument("--select", default=None,
+                        help="selection passed to the analyzer, e.g. a single "
+                             "freq_id '844', a list '614,706', a range "
+                             "'506-552' (spectrum needs explicit freq_ids), or "
+                             "events with 'events:349382977[,...]' for an "
+                             "event-oriented analyzer")
+    p_scan.add_argument("--root", default=None,
+                        help="working root containing data/ and results/ "
+                             "(default: current directory)")
+    p_scan.add_argument("--out", default=None, help="product path (default results/<tel>/<analyzer>/<sel>.npz)")
+    p_scan.add_argument("--inventory", default=None,
+                        help="explicit inventory.jsonl path (alternative to "
+                             "--name); its meta sidecar backfills "
+                             "telescope/source/reader")
+    p_scan.add_argument("--name", default=None,
+                        help="named inventory as written by survey; "
+                             "alternative to --inventory")
+    p_scan.add_argument("--source-root", default=None, help="local source: input dir")
+    p_scan.add_argument("--source-glob", default="*.h5", help="local source: file glob")
+    p_scan.add_argument("--source-freq-id-regex", default=None,
+                        help="local source: regex with one group capturing the "
+                             "freq_id int from a filename (default _(\\d+)\\.h5$)")
+    p_scan.add_argument("--source-event-regex", default=None,
+                        help="local source: regex with one group capturing the "
+                             "event id from a filename "
+                             "(default baseband_(\\d+)_)")
+    p_scan.add_argument("--nfft", type=positive_int, default=None,
+                        help="override the analysis frame/FFT length for this run "
+                             "(default: the instrument YAML's nfft)")
+    p_scan.add_argument(
+        "--tmp-dir", default=None,
+        help="scratch directory for staged files. Default: a unique directory "
+             "under DATATRAWL_TMPDIR, writable /scratch, or the OS temp directory")
+    p_scan.add_argument(
+        "--checkpoint-every", type=positive_int,
+        default=pipeline.DEFAULT_CHECKPOINT_EVERY,
+                        help="write the product checkpoint every N successfully "
+                             "consumed files "
+                             f"(default {pipeline.DEFAULT_CHECKPOINT_EVERY}); "
+                             "resume restarts from the last "
+                             "checkpoint, so lower = less redo after a kill, "
+                             "more I/O")
+    p_scan.add_argument(
+        "--download-workers", type=positive_int,
+        default=pipeline.DEFAULT_DOWNLOAD_WORKERS,
+                        help=("download threads "
+                             f"(default {pipeline.DEFAULT_DOWNLOAD_WORKERS}). "
+                             "Concurrent fetches "
+                             "also require multiple staging slots; relaxed "
+                             "settings may deliver files out of source order, so "
+                             "the analyzer must be order-insensitive"))
+    p_scan.add_argument(
+        "--max-staged-files", type=positive_int,
+        default=pipeline.DEFAULT_MAX_STAGED_FILES,
+                        help=("maximum files kept on scratch at once "
+                             f"(default {pipeline.DEFAULT_MAX_STAGED_FILES}). "
+                             "Higher values allow download/analyze overlap and "
+                             "require space for about N times the largest file"))
+    p_scan.add_argument("--max-files", type=positive_int, default=None,
+                        help="process only the first N units of the selection "
+                             "(bounded smoke test; keep its product separate "
+                             "from an uncapped run)")
+    p_scan.add_argument("--max-frames-per-file", type=positive_int, default=None,
+                        help="analyze only the first N frames (FFT windows) of each "
+                             "file -- caps per-file work for a fast spot-check "
+                             "(note: the whole file is still fetched)")
+    p_scan.add_argument("--quarantine", default=None,
+                        help="quarantine ledger path (default "
+                             "results/<tel>/quarantine/<source>--<reader>.jsonl); bad/unreadable "
+                             "files are recorded here and skipped on re-runs")
+    p_scan.add_argument("--no-quarantine", action="store_true",
+                        help="disable quarantine; treat unreadable files as "
+                             "hard (retryable) failures instead")
+    p_scan.add_argument("--gpu", action="store_true",
+                        help="hint analyzers to use the GPU (exposed as "
+                             "ctx.options['gpu']; an analyzer opts in)")
+    p_scan.add_argument("--set", dest="set_opts", action="append", metavar="KEY=VALUE",
+                        help="plugin-specific parameter passed via ctx.options "
+                             "(repeatable), e.g. --set bracket_hz=400")
+    p_scan.add_argument("--dry-run", action="store_true",
+                        help="list what would be processed, then exit without "
+                             "staging or analyzing anything")
+    p_scan.set_defaults(func=cmd_scan)
+
+    p_setup_cupy = sub.add_parser(
+        "setup-cupy",
+        help="report the matching CuPy build, or install it with --install")
+    p_setup_cupy.add_argument(
+        "--install", action="store_true",
+        help="pip-install the detected cupy-cudaXXx wheel if the image has no cupy "
+             "(otherwise just report what is found)")
+    p_setup_cupy.set_defaults(func=cmd_setup_cupy)
+    return ap
+
+
+def main(argv=None) -> int:
+    args = build_parser().parse_args(argv)
+    registry.load_plugins(extra=getattr(args, "plugin", None) or [])
+    return args.func(args)
+
+
+if __name__ == "__main__":
+    sys.exit(main())

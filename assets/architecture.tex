@@ -1,0 +1,15 @@
+% datatrawl architecture diagram -- standalone wrapper for the shared body
+% assets/architecture.tikz, which the tutorial deck (docs/presentation/)
+% also \input s. Palette and styles: assets/datatrawl-figures.sty.
+% Regenerate the README asset with:  make diagram
+\documentclass[tikz,border=8pt]{standalone}
+\usepackage{lmodern}
+\usepackage[T1]{fontenc}
+\usepackage{amssymb}
+\renewcommand{\familydefault}{\sfdefault}
+\usetikzlibrary{arrows.meta,positioning,calc,fit,shapes.geometric,decorations.pathreplacing}
+\pagecolor{white}
+\input{datatrawl-figures.sty}
+\begin{document}
+\input{architecture.tikz}
+\end{document}

@@ -1,0 +1,32 @@
+\begin{tikzpicture}[x=.92cm,y=.92cm,
+      slothead/.style={card,minimum width=2.7cm,minimum height=0.85cm,
+                       font=\fontsize{10.5}{12.5}\selectfont\bfseries,text=DTCyanText},
+      slotchip/.style={chip,font=\fontsize{9}{11}\selectfont},
+      slotnote/.style={sublabel,text width=3.2cm}]
+
+    \node[slothead] at (2.0,4.7) {instrument};
+    \node[slotchip] at (2.0,3.8) {chime};
+    \node[slotchip] at (2.0,3.1) {gbo};
+    \node[slotchip] at (2.0,2.4) {\dots};
+    \node[slotnote] at (2.0,1.35) {changes are PRs --- e.g.\ a new metadata field};
+
+    \node[slothead] at (5.9,4.7) {source};
+    \node[slotchip] at (5.9,3.8) {cadc-datatrail};
+    \node[slotchip] at (5.9,3.1) {local};
+    \node[slotnote] at (5.9,1.35) {changes are PRs --- maybe cluster sources};
+
+    \node[slothead] at (9.8,4.7) {reader};
+    \node[slotchip] at (9.8,3.8) {baseband};
+    \node[slotchip] at (9.8,3.1) {gain};
+    \node[slotchip] at (9.8,2.4) {N$^2$};
+    \node[slotnote] at (9.8,1.35) {changes are PRs --- new data types};
+
+    \node[slothead,cardamber,text=DTAmber] at (13.7,4.7) {analyzer};
+    \node[slotchip] at (13.7,3.8) {spectrum (example)};
+    \node[slotchip] at (13.7,3.1) {F-statistic};
+    \node[chipamber,font=\fontsize{9}{11}\selectfont\bfseries] at (13.7,2.4) {yours};
+    \node[slotnote] at (13.7,1.35) {never a PR --- lives in your project};
+
+    \node[text=DTGreen,font=\fontsize{10}{12}\selectfont\bfseries] at (7.85,0.35)
+      {Plug in the analysis code you already have --- without bending it to CANFAR.};
+  \end{tikzpicture}

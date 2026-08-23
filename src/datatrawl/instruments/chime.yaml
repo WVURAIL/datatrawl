@@ -1,0 +1,26 @@
+# CHIME -- the reference instrument. The outrigger stations (gbo, hco, kko) share
+# this channelization and inherit it via `extends: chime`, overriding only what
+# differs (feed count, baseband scope).
+name: chime
+
+band:
+  f0_mhz: 800.0          # sky frequency at freq_id 0
+  bandwidth_mhz: 400.0   # 400-800 MHz
+  n_channels: 1024       # channel spacing => fs = 400e6/1024 = 390625 Hz
+  descending: true       # freq_id increases as frequency decreases
+
+nyquist_zone: 2          # second Nyquist zone: inverted baseband frequency axis
+                         # measured on a strong in-band carrier.
+n_feeds: 2048            # feeds incoherently combined (square-then-average)
+nfft: 16384              # analysis FFT length per frame (Df = 23.84 Hz)
+
+# Datatrail baseband scope(s) this station registers. Used as the default survey
+# scope(s) when --scope is omitted; an explicit --scope overrides. Non-baseband
+# CHIME products live under other scopes and are not listed here -- this is only
+# what the chime-baseband reader handles.
+scopes:
+  - chime.event.baseband.raw
+  - chime.scheduled.baseband.raw
+
+reader: chime-baseband   # canonical reader; `scan` uses it when --reader is
+                         # omitted (override for a different file format).

@@ -1,0 +1,397 @@
+\documentclass[10pt,letterpaper]{article}
+
+\usepackage[letterpaper,margin=0.70in,headheight=22pt,headsep=16pt,footskip=24pt]{geometry}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{lmodern}
+\usepackage{microtype}
+\usepackage{xcolor}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{tabularx}
+\usepackage{longtable}
+\usepackage{amsmath,amssymb}
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta,positioning,calc,shapes.geometric,decorations.pathreplacing,fit}
+\usepackage{enumitem}
+\usepackage{fancyhdr}
+\usepackage{titlesec}
+\usepackage{caption}
+\usepackage{listings}
+\usepackage{xurl}
+\usepackage[hidelinks]{hyperref}
+\usepackage{lastpage}
+\usepackage{float}
+\usepackage{placeins}
+\usepackage{needspace}
+
+\definecolor{TrawlAmber}{HTML}{A66A00}
+\definecolor{TrawlGray}{HTML}{555555}
+\definecolor{TrawlBlue}{HTML}{144E8C}
+\definecolor{LightGray}{HTML}{F3F3F3}
+\definecolor{MidGray}{HTML}{D9D9D9}
+\definecolor{DarkText}{HTML}{1A1A1A}
+\definecolor{GoodGreen}{HTML}{2B7A2B}
+\definecolor{WarnOrange}{HTML}{A65E00}
+
+\renewcommand{\familydefault}{\sfdefault}
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{5pt}
+\renewcommand{\arraystretch}{1.15}
+\sloppy
+\setlist[itemize]{leftmargin=1.2em,itemsep=2pt,topsep=2pt}
+\setlist[enumerate]{leftmargin=1.4em,itemsep=2pt,topsep=2pt}
+
+\titleformat{\section}{\Large\bfseries\color{DarkText}}{}{0pt}{}[\vspace{-3pt}\color{TrawlAmber}\titlerule]
+\titleformat{\subsection}{\large\bfseries\color{DarkText}}{}{0pt}{}
+\titleformat{\subsubsection}{\normalsize\bfseries\color{DarkText}}{}{0pt}{}
+
+\newcommand{\code}[1]{\texttt{\detokenize{#1}}}
+\newcolumntype{Y}{>{\raggedright\arraybackslash}X}
+\newcolumntype{L}[1]{>{\raggedright\arraybackslash}p{#1}}
+\captionsetup{font=small,labelfont=bf}
+
+\lstdefinestyle{shell}{
+  basicstyle=\ttfamily\footnotesize,
+  breaklines=true,
+  columns=fullflexible,
+  frame=single,
+  rulecolor=\color{MidGray},
+  backgroundcolor=\color{LightGray},
+  keepspaces=true,
+  showstringspaces=false
+}
+\lstset{style=shell}
+
+\newcommand{\notebox}[1]{%
+  \vspace{4pt}\noindent\fcolorbox{TrawlBlue}{LightGray}{%
+  \begin{minipage}{0.965\linewidth}%
+  \textbf{Note:} #1%
+  \end{minipage}}\vspace{4pt}}
+
+\newcommand{\importantbox}[1]{%
+  \vspace{4pt}\noindent\fcolorbox{TrawlAmber}{LightGray}{%
+  \begin{minipage}{0.965\linewidth}%
+  \textbf{Important:} #1%
+  \end{minipage}}\vspace{4pt}}
+
+\newcommand{\field}[1]{\texttt{\detokenize{#1}}}
+
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[L]{\small Datatrawl-UG001}
+\fancyhead[C]{\small Storage-Safe Archive Trawling Engine}
+\fancyhead[R]{\small User Guide}
+\fancyfoot[L]{\small Datatrawl-UG001}
+\fancyfoot[C]{\small West Virginia University}
+\fancyfoot[R]{\small Page \thepage\ of \pageref{LastPage}}
+\renewcommand{\headrulewidth}{0.8pt}
+\renewcommand{\headrule}{\hbox to\headwidth{\color{TrawlAmber}\leaders\hrule height \headrulewidth\hfill}}
+\renewcommand{\footrulewidth}{0.8pt}
+\renewcommand{\footrule}{\hbox to\headwidth{\color{TrawlAmber}\leaders\hrule height \footrulewidth\hfill}}
+
+\title{datatrawl Storage-Safe Archive Trawling Engine\\User Guide}
+\author{West Virginia University}
+\date{Datatrawl-UG001 \\ August 2026}
+\hypersetup{
+  pdftitle={datatrawl Storage-Safe Archive Trawling Engine -- User Guide},
+  pdfauthor={West Virginia University Radio Astronomy Instrumentation Lab (RAIL)},
+  pdfsubject={Datatrawl-UG001},
+  pdfkeywords={datatrawl, radio astronomy, archive analysis, user guide}
+}
+
+\begin{document}
+\thispagestyle{fancy}
+{\sffamily
+\begin{minipage}[t]{0.39\textwidth}
+  {\fontsize{24}{26}\selectfont\bfseries\color{TrawlAmber}datatrawl}\par
+  {\small Datatrawl-UG001, August 2026}
+\end{minipage}%
+\begin{minipage}[t]{0.61\textwidth}
+  \raggedleft
+  {\large\bfseries User Guide}\par
+  {\small Install, plan, run, resume.}\par
+  {\small West Virginia University Radio Astronomy Instrumentation Lab (RAIL)}
+\end{minipage}
+}
+\vspace{6pt}
+{\color{TrawlAmber}\hrule height 1.2pt}
+\vspace{8pt}
+
+\section{The Model in One Paragraph}
+Long archive scans are limited by scratch space and interrupted computing
+sessions. We address these constraints by processing one primary file as one
+unit and checkpointing a small analysis product. A run combines four choices:
+a \textbf{telescope} supplies geometry and metadata, a \textbf{source} lists
+and stages files, a \textbf{reader} converts one staged file into arrays, and
+an \textbf{analyzer} performs the science calculation. The engine fetches,
+analyzes, and removes each unit while keeping the number of staged files within
+the configured bound. Use \code{datatrawl doctor} to check the four choices
+before starting a long scan.
+
+\section{Installation}
+\begin{lstlisting}
+git clone https://github.com/WVURAIL/datatrawl.git
+cd datatrawl
+python -m venv .venv && source .venv/bin/activate
+pip install -e ".[dev,examples]"   # offline/local development
+# For archive/CANFAR use instead:
+#   pip install -e ".[survey,examples,dev]"
+#   cadc-get-cert -u <your_cadc_username>
+#   datatrail config init --site canfar
+datatrawl --version
+pytest -q
+\end{lstlisting}
+The \code{[cadc]} extra supports CADC fetching from an existing inventory. The
+\code{[survey]} extra adds the CADC clients and
+\code{datatrail-cli>=0.11.0} for inventory construction. The \code{[gpu]}
+extra does not pin CuPy because the installed CuPy build must match the session
+image (see \S\ref{sec:cupy}).
+
+\section{Discovering What Is Available}
+\begin{lstlisting}
+datatrawl list                 # everything at a glance
+datatrawl list telescopes      # ready, geometry-only, or invalid
+datatrawl list readers
+datatrawl list analyzers
+datatrawl list sources
+\end{lstlisting}
+Next, check the combination that will be used for the scan:
+\begin{lstlisting}
+datatrawl doctor --telescope chime --source cadc-datatrail \
+                 --reader chime-baseband --analyzer spectrum
+\end{lstlisting}
+\code{doctor} reports the installed components, reader-to-analyzer stream
+compatibility, configuration, credentials, and readiness of the selected
+combination.
+
+When the archive layout is not yet known, first build a discovery map. The
+\code{survey --scopes-only} mode lists datasets across scopes without
+enumerating events or downloading files. It writes the result to
+\code{scopes.jsonl}, or to
+\code{scopes-<name>.jsonl} with \code{--name}, so successive recons do not
+overwrite one another:
+\begin{lstlisting}
+datatrawl survey --telescope gbo --scopes-only              # this telescope's scopes
+datatrawl survey --scopes-only                              # every scope datatrail sees
+datatrawl survey --telescope gbo --scopes-only \
+    --scope gbo.acquisition.processed --match gain --expand --name gains
+\end{lstlisting}
+\Needspace{11\baselineskip}
+\code{--telescope} restricts discovery to live scopes whose first name
+component matches the telescope. These scopes come from Datatrail rather than
+the instrument YAML, because the YAML only declares scopes used by the event
+survey. Omit \code{--telescope} to inspect every visible scope.
+\code{--match} keeps names containing all comma-separated terms.
+\code{--expand} opens each retained dataset by one level, so a container such
+as \code{complex_gains} contributes its children as rows with a
+\field{parent} column. Each row can then be inspected with
+\code{datatrail ps <scope> <dataset> -s}. If Datatrail does not answer for a
+scope, the command identifies that scope and marks the map INCOMPLETE.
+\notebox{Discovery maps names and containers. The event survey enumerates only
+event-keyed products. For a timestamped product such as a calibration
+acquisition, use \code{--scopes-only --expand}, then list the selected dataset
+with \code{DATATRAIL.files()}. See
+\code{docs/DATATRAIL_BOUNDARY.md} for the division of responsibility.}
+
+\section{Building an Inventory}
+\code{survey} converts the archive listing into the units required by one
+analysis. It writes a named inventory directory under
+\code{~/datatrawl-inventories/} (overridable with
+\code{DATATRAWL_INVENTORY_ROOT} or \code{--root}), named
+\code{<telescope>-fid<freq_ids>} by default or by \code{--name}. The inventory metadata records the telescope, source, and
+reader, so a later scan only needs the inventory and analyzer:
+\begin{lstlisting}
+datatrawl survey \
+  --telescope chime --source cadc-datatrail \
+  --scope chime.event.baseband.raw \
+  --freq-ids 844 --max-events 5 --name chime-spectrum-844
+
+datatrawl explore --name chime-spectrum-844
+\end{lstlisting}
+The \code{--max-events 5} setting bounds this first survey. Survey verifies
+candidate files but does not bulk-download them. The inventory remains on disk
+between commands. The built-in \code{cadc-datatrail} source commits each event and its rows transactionally in
+\code{survey_state.sqlite3}; \code{inventory.jsonl} and the text ledgers are
+generated views. Do not edit those files or the database. A survey manifest
+binds the directory to its scopes, frequency IDs, reader shape, instrument
+geometry, and shape-changing options; choose a fresh \code{--name} to change
+those inputs or re-probe a completed event. Custom sources own their survey
+persistence behavior. During a scan, the current engine loads the rows selected for
+one product into memory before staging begins. Memory use therefore grows with
+the selected inventory size.
+
+The reader defines the \emph{archive file shape}: the files expected for one
+event and their names (\field{Reader.survey_files}). Survey uses the
+telescope's canonical reader unless \code{--reader} overrides it. Each
+verified row records its \field{name}; a later scan stages that recorded file
+instead of reconstructing the naming rule. To survey a non-baseband product,
+load a reader that defines its archive shape with \code{--plugin}; see
+\code{docs/ADDING_A_READER.md}.
+
+\section{Running a Scan}
+\begin{lstlisting}
+datatrawl scan \
+  --name chime-spectrum-844 --analyzer spectrum --select 844 \
+  --max-frames-per-file 5
+\end{lstlisting}
+This command limits each file to five frames and is intended as a smoke test.
+For an uncapped run, use a new \code{--out} or remove the smoke-test product.
+The spectrum analyzer rejects a resume when the cap differs.
+\begin{itemize}
+  \item \code{--select} is interpreted by the analyzer. For the spectrum
+        analyzer: explicit \field{freq_id}s such as \code{844},
+        \code{614,706}, or ranges like \code{506-552}. Event-oriented
+        analyzers take \code{events:349382977[,...]}, and a
+        \field{plan_runs} may return the dict form
+        \code{{"events": [...], "freq_ids": ...}}; filters are exact and
+        ANDed. A malformed selection reports the accepted grammar. The
+        analyzer's \field{plan_runs} decides product fan-out;
+        the built-in spectrum analyzer creates one independent product per
+        selected \field{freq_id}.
+  \item \code{--checkpoint-every N} (default 50) sets the checkpoint
+        interval. Files consumed after the most recent completed checkpoint
+        may need to be processed again after an interruption.
+  \item \code{--download-workers} sets the number of fetch threads; concurrent
+        fetches also require more than one staging slot.
+        \code{--max-staged-files} caps fetched or in-progress files on scratch
+        and permits fetch/analyze overlap. Analyzer calls remain serial on the
+        engine's main thread. The engine refuses either value above 1 when the
+        analyzer declares \field{requires_in_order}.
+  \item \code{--plugin yourpkg.module} loads an external plugin explicitly;
+        installed packages advertising the \code{datatrawl.plugins}
+        entry-point group are found automatically.
+\end{itemize}
+
+\importantbox{At the defaults, one staged or in-progress file occupies scratch.
+If \code{--max-staged-files} is raised, the configured number is the file-count
+bound. Without \code{--tmp-dir}, each invocation receives a unique staging
+directory. An explicit \code{--tmp-dir} is used as-is, so concurrent scans
+require distinct paths. The engine removes the files it stages; use a scratch
+directory that does not contain source data or other required files. If
+cancellation times out while a source fetch is still writing, datatrawl
+retains and reports that directory. Wait for the fetch or process to stop
+before removing the reported path. Custom network sources must give every
+fetch a bounded timeout.}
+
+\section{Interrupt and Resume}
+A session timeout, preemption, or \code{Ctrl-C} may stop a scan. Repeat the
+same command with the same output to continue. The analyzer reloads the last
+completed checkpoint and reports its committed unit keys; the engine skips
+matching units. Files consumed after that checkpoint may be processed again.
+The supplied analyzer base class and spectrum analyzer write a temporary
+product in the output directory and replace the prior checkpoint only after the
+write completes. The accumulating base also stores a fail-closed resume
+manifest covering analyzer identity, instrument geometry, selection, and the
+analyzer's \field{resume\_parameters(ctx)}. It refuses older products without
+that manifest. A custom save/resume format owns equivalent recovery and
+compatibility behavior. Use a new output location when intentionally changing
+the configuration.
+
+\Needspace{7\baselineskip}
+\section{CANFAR / CADC Notes}
+On CANFAR, install \code{[survey]} when building an inventory; this extra
+includes the CADC clients. Use \code{[cadc]} alone when scanning an existing
+inventory without Datatrail discovery. Obtain a valid CADC proxy certificate,
+then run \code{datatrawl doctor --source cadc-datatrail ...} to check the
+credentials and Datatrail interface. Datatrail remains the archive authority
+and datatrawl reads from it. The boundary is defined in
+\code{docs/DATATRAIL_BOUNDARY.md}. For a long scan, choose
+\code{--checkpoint-every} by balancing repeated work after interruption
+against product-write overhead.
+
+\section{GPU Sessions and CuPy}\label{sec:cupy}
+GPU analyzers use CuPy. The CuPy build must match the CUDA runtime in the
+session image, so datatrawl does not pin it as a package dependency. On a GPU
+node:
+\begin{lstlisting}
+datatrawl setup-cupy            # report the image's CUDA + the matching wheel
+datatrawl setup-cupy --install  # install cupy-cudaXXx into the active venv
+\end{lstlisting}
+Without \code{--gpu}, the built-in spectrum analyzer uses NumPy. With
+\code{--gpu}, it requires CuPy; if CuPy cannot be imported, the scan reports
+the setup command and stops. The CPU and GPU paths implement the same
+calculation, although floating-point roundoff may differ.
+
+\section{Writing an Analyzer}
+The analyzer performs the analysis and owns the product contract. Prefer
+\field{AccumulatingAnalyzer}, declare the reader stream it accepts, and register
+the class:
+\begin{lstlisting}
+class MyAnalyzer(AccumulatingAnalyzer):
+    info = PluginInfo(
+        name="my-analyzer", ...,
+        accepts_stream_kinds=(STREAM_COMPLEX_BASEBAND,),
+    )
+    requires_in_order = False   # True for any order-dependent product
+
+    def resume_parameters(self, ctx): # meaning-changing analyzer options
+        return {"threshold": float(ctx.options["threshold"])}
+    def begin(self, ctx, first_meta): # once, at the first new file
+    def consume_file(self, arrays, meta):  # accumulate; return n frames
+    def _product(self):               # fields added to the atomic NPZ
+    def _restore(self, z):            # restore analyzer accumulators
+    def summary(self):                # one status line
+\end{lstlisting}
+The base class manages committed keys, atomic writes, and the resume manifest.
+Its default \field{resume\_parameters} includes every run option; override it
+with a normalized, complete mapping when operational paths should not define
+product compatibility. A custom \field{save}/\field{resume} implementation
+must supply equivalent behavior.
+Two optional hooks define selection behavior. \field{resolve_selection}
+interprets \code{--select}, and \field{plan_runs} divides that selection into
+independent runs. Each run receives a new analyzer instance and product.
+Analyzer calls occur on the engine's main thread. The complete lifecycle and
+inventory-metadata contract are described in
+\code{docs/ADDING_AN_ANALYZER.md} and the corresponding reader, source, and
+telescope guides.
+
+\Needspace{12\baselineskip}
+The repository includes two worked patterns. For \emph{per-event fan-out},
+\field{plan_runs} returns one
+\code{{"events": [ev], "freq_ids": spec}} sub-selection per event, so each
+event becomes its own resumable product
+(\code{ev<event>[_<freq_ids>].npz}); both archive and local sources
+understand this dictionary. For a \emph{companion side-load}, an analyzer that
+needs calibration gains or flags loads a lookup once in \field{begin}, then
+selects the companion from \field{meta["event"]} for each primary file. The
+analyzer records the companion identity in its product and rejects a resume if
+the lookup changes. Day-keyed companion archives can instead resolve with
+\code{DATATRAIL.files(scope, day)}, imported from
+\code{datatrawl.plugins.sources} --- the programmatic
+\code{datatrail ps -s}. The runnable, CLI-tested reference is
+\code{examples/per_event_companions.py}; the patterns are written out in
+\code{docs/ADDING_AN_ANALYZER.md}.
+
+\importantbox{If the product depends on consume order, including a running
+statistic, trailing statistic, or CFAR baseline, set
+\field{requires_in_order = True}. The engine then rejects either parallel or
+prefetch setting above 1.}
+
+\Needspace{0.20\textheight}
+\section{Troubleshooting}
+\begin{tabularx}{\linewidth}{L{0.34\linewidth} Y}
+\toprule
+\textbf{Symptom} & \textbf{First move} \\
+\midrule
+``How do I even start?'' & \code{datatrawl list}, then \code{datatrawl doctor}
+with your four choices. \\
+Scan refuses to start & Read the doctor-style preflight error: missing extra,
+missing credential, or a reader/telescope mismatch. \\
+Resume refused & The existing product was built with different parameters;
+the analyzer prevents those configurations from being combined. Rebuild in a
+new output location. \\
+Parallel flags refused & The analyzer declares \field{requires_in_order};
+run at the defaults. \\
+Anything else & \code{docs/TROUBLESHOOTING.md} in the repository. \\
+\bottomrule
+\end{tabularx}
+
+\section{Related Documents}
+\textbf{Datatrawl-DS001} (product specification: contracts, limits,
+interfaces); the \code{docs/ADDING_*.md} extension guides;
+\code{docs/DATATRAIL_BOUNDARY.md}.
+
+
+\end{document}

@@ -1,0 +1,33 @@
+\begin{tikzpicture}[x=.92cm,y=.92cm]
+    % pipeline: event -> resolve -> verify -> one of five accounting outcomes
+    \node[card,minimum width=1.9cm,minimum height=1.1cm] (ev) at (1.35,4.35) {\bfseries event};
+    \node[card,minimum width=3.0cm,minimum height=1.35cm,text width=2.6cm] (resolve) at (4.6,4.35)
+      {resolve\\common path};
+    \node[card,minimum width=3.3cm,minimum height=1.35cm,text width=2.9cm] (verify) at (9.1,4.35)
+      {verify expected\\files vs metadata};
+
+    \node[chipgreen,font=\fontsize{10}{12}\selectfont\bfseries] (rows) at (13.75,5.35) {rows written};
+    \node[chipamber,font=\fontsize{10}{12}\selectfont\bfseries] (inc) at (13.75,3.35) {incomplete};
+    \node[cardamber,minimum height=1.05cm,inner xsep=2.6mm,font=\fontsize{10}{12}\selectfont] (rbe) at (9.1,1.35)
+      {\bfseries resolved-but-empty};
+    \node[chip,draw=DTGray,text=DTSoft,font=\fontsize{10}{12}\selectfont\bfseries] (acc) at (13.75,1.35) {accepted-empty};
+    \node[chipred,font=\fontsize{10}{12}\selectfont\bfseries] (nodata) at (4.6,0.55) {no-data};
+
+    \draw[flow] (ev)--(resolve);
+    \draw[flow] (resolve)--(verify) node[midway,above,label]{resolved};
+    \draw[flowred] (resolve)--(nodata)
+      node[pos=0.42,right,label,align=left]{no usable\\common path};
+    \draw[flowgreen] ([yshift=3mm]verify.east) -- (rows.west)
+      node[pos=0.55,above,sloped,label]{files verified};
+    \draw[flowamber] ([yshift=-3mm]verify.east) -- (inc.west)
+      node[pos=0.52,below,sloped,label]{unverified at retry limit};
+    \draw[flowamber] (verify)--(rbe) node[midway,right,label,align=left]{0 files this run};
+    \draw[return] (rbe.west) -| ([xshift=-9mm]resolve.south)
+      node[pos=0.30,above,label]{retried by the next survey};
+    \draw[flowmuted] (rbe)--(acc);
+    \node[sublabel,text width=4.2cm] at (11.65,0.5)
+      {attempt limit, or observation older than \texttt{--empty-age-days}};
+
+    \node[sublabel,anchor=west] at (12.6,4.62) {kept in \texttt{inventory.jsonl}};
+    \node[sublabel,anchor=west] at (12.6,2.72) {verified rows still kept};
+  \end{tikzpicture}
