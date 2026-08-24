@@ -159,8 +159,10 @@ pytest -q             # reader -> analyzer -> checkpoint -> resume on synthetic 
 ```
 
 The test suite runs the reader, analyzer, checkpoint, and resume paths on
-synthetic data. `make test` runs this suite. `make smoke` runs the `list` and
-`doctor` checks.
+synthetic data. The base install does not include `pytest`; add it with
+`pip install pytest` in the same environment, or install the `dev` extra.
+`make test` runs this suite. `make smoke` runs the `list` and `doctor`
+checks.
 
 ## Example: a CHIME single-freq_id spectrum
 
@@ -209,6 +211,11 @@ datatrawl scan \
   --name chime-spectrum-844 --analyzer spectrum --select 844 \
   --max-frames-per-file 5
 ```
+
+The survey writes `inventory.jsonl` and its sidecars under
+`~/datatrawl-inventories/<name>/`. Set `DATATRAWL_INVENTORY_ROOT` to relocate
+that root, or pass an explicit `--root`/`--inventory`; `explore` and `scan`
+resolve `--name` through the same root, independent of the working directory.
 
 <p align="center">
   <img src="https://raw.githubusercontent.com/WVURAIL/datatrawl/master/assets/fig-survey-filter.svg" alt="Survey is a filter: the archive with duplicates and missing channels, filtered by chime/baseband criteria into inventory.jsonl -- only the selected channels, only events that carry them, every unit exactly once, metadata only." width="800">
@@ -523,10 +530,10 @@ auxiliary inputs.
 ## Guides
 
 This README is the installation and workflow overview. The Markdown guides
-below are the canonical behavioral and extension contracts; the printable data
-sheet, user guide, and tutorial are rendered explanations of those contracts.
-When behavior changes, update the relevant Markdown guide first and then bring
-the rendered documents and slides into agreement.
+below are the canonical behavioral and extension contracts. The printable data
+sheet, user guide, and tutorial slides are frozen snapshots kept for
+reference; when behavior changes, only this README and the Markdown guides
+are updated.
 
 | Guide | Purpose |
 |---|---|
@@ -555,7 +562,8 @@ defines this interface.
 
 ## Build documentation
 
-The formal data sheet and user guide are
+The rendered documents below are frozen snapshots; the Markdown guides are
+canonical. The formal data sheet and user guide are
 `docs/Datatrawl_DS001_Data_Sheet.tex` and
 `docs/Datatrawl_UG001_User_Guide.tex`, in the WVURAIL document style. Git
 ignores the generated PDFs. Build them locally with:
