@@ -1,4 +1,4 @@
-# K'niʔatn K'l‿stk'masqt Outrigger (KKO). CHIME-compatible channelization, so it
+# KKO Outrigger. CHIME-compatible channelization, so it
 # inherits all of CHIME's geometry via `extends` and overrides only feeds + scope.
 name: kko
 extends: chime

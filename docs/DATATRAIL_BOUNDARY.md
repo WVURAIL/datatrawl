@@ -78,7 +78,7 @@ If:
 datatrail ls gbo.acquisition.processed
 ```
 
-prints “Larger Datasets”, the names in that table may be containers.
+prints "Larger Datasets", the names in that table may be containers.
 
 If:
 

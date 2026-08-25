@@ -163,8 +163,8 @@ Any other reader exception is a run-level failure and does not quarantine the
 file. This is intentional: a missing dependency or reader bug is not evidence
 that the input is bad. Fix the environment or reader and rerun.
 
-Quarantine means “do not retry automatically,” not “the archive copy is proven
-permanently corrupt.” Review the JSONL record. To test the unit again, stop all
+Quarantine means "do not retry automatically," not "the archive copy is proven
+permanently corrupt." Review the JSONL record. To test the unit again, stop all
 scans using that ledger, remove its line, and rerun. `--no-quarantine` disables
 the ledger and treats reader failures as run failures instead.
 

@@ -12,9 +12,9 @@ make slides          # from the repository root
 
 This produces two PDFs in `docs/presentation/out/`:
 
-- `datatrawl_tutorial.pdf` — double-wide pages with presenter notes on the
+- `datatrawl_tutorial.pdf` - double-wide pages with presenter notes on the
   right half, for presenting with a second screen (`pdfpc`, Skim, etc.).
-- `datatrawl_tutorial_slides.pdf` — the clean 16:9 export for projectors
+- `datatrawl_tutorial_slides.pdf` - the clean 16:9 export for projectors
   and sharing.
 
 The deck needs **LuaLaTeX**: the Amurmaple theme's `delaunay` title decoration
@@ -34,10 +34,10 @@ luamesh runs.
 
 ## Structure
 
-- `datatrawl_tutorial.tex` — the deck. Frame titles carry the primary claims;
+- `datatrawl_tutorial.tex` - the deck. Frame titles carry the primary claims;
   `\note{...}` blocks carry the spoken narration.
-- `beamercolorthemewvu.sty` — the WVU brand color theme for Amurmaple.
-- `imgs/` — WVU and GWAC marks used on the title page and slide corners.
+- `beamercolorthemewvu.sty` - the WVU brand color theme for Amurmaple.
+- `imgs/` - WVU and GWAC marks used on the title page and slide corners.
 - Shared figures live in `assets/` at the repository root:
   `assets/datatrawl-figures.sty` is the palette and TikZ vocabulary, and
   `assets/*.tikz` (the architecture diagram and the `fig-*` figures) are
